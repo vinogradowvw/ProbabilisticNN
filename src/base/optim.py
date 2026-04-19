@@ -75,16 +75,27 @@ GRNN_LOSS_REGISTRY = {
     "mae": L1Loss()
 }
 
-def _resolve_loss(loss: str):
+
+def _resolve_loss(loss: str, model):
     """Resolve a string loss name into a callable loss function.
 
     Преобразует строковое имя loss-функции в вызываемую функцию.
     """
-    try:
-        return LOSS_REGISTRY[loss.lower()]
-    except KeyError as exc:
-        available = ", ".join(sorted(LOSS_REGISTRY))
-        raise ValueError(f"Unknown loss={loss!r}. Available: {available}") from exc
+    from pnn.pnn import PNN
+    from grnn.grnn import GRNN
+
+    if isinstance(model, PNN):
+        try:
+            return PNN_LOSS_REGISTRY[loss.lower()]
+        except KeyError as exc:
+            available = ", ".join(sorted(PNN_LOSS_REGISTRY))
+            raise ValueError(f"Unknown loss={loss!r}. Available: {available}") from exc
+    if isinstance(model, GRNN):
+        try:
+            return GRNN_LOSS_REGISTRY[loss.lower()]
+        except KeyError as exc:
+            available = ", ".join(sorted(GRNN_LOSS_REGISTRY))
+            raise ValueError(f"Unknown loss={loss!r}. Available: {available}") from exc
 
 
 class BandwidthOptimizer:
@@ -96,7 +107,7 @@ class BandwidthOptimizer:
     def __init__(
         self,
         model,
-        loss=log_likelihood_ratio_loss,
+        loss="log_likelihood_ratio",
         lr=1e-2,
         max_iter=100,
         tol=1e-4,
@@ -106,7 +117,7 @@ class BandwidthOptimizer:
     ):
         self.max_iter = max_iter
         self.loss = loss
-        self.loss_fn_ = _resolve_loss(loss) if isinstance(loss, str) else loss
+        self.loss_fn_ = _resolve_loss(loss, model)
         self.tol = tol
         self.lr = lr
         self.model = model
