@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from torch.nn import MSELoss, L1Loss
 
 
 def log_likelihood_ratio_loss(y_true, y_pred, f, proba=None, eps=1e-8):
@@ -62,13 +63,17 @@ def cross_entropy_loss(y_true, y_pred, f, proba, eps=1e-8):
     return F.cross_entropy(torch.log(proba), y_true)
 
 
-LOSS_REGISTRY = {
+PNN_LOSS_REGISTRY = {
     "log_likelihood_ratio": log_likelihood_ratio_loss,
     "correct_class_probability": correct_class_probability_loss,
     "bce": bce_loss,
     "cross_entropy": cross_entropy_loss,
 }
 
+GRNN_LOSS_REGISTRY = {
+    "mse": MSELoss(),
+    "mae": L1Loss()
+}
 
 def _resolve_loss(loss: str):
     """Resolve a string loss name into a callable loss function.
