@@ -5,6 +5,10 @@ __pycache__/
 
 .DS_Store
 
+*.md
+*.pdf
+.obsidian
+
 # C extensions
 *.so
 
