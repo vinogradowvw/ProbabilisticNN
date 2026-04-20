@@ -41,14 +41,15 @@ class AdaptiveGRNN(GRNN):
 
     def __init__(
         self, 
-        kernel,
-        loss,
-        lr,
-        eps,
-        max_iter,
-        tol,
-        normalize,
-        verbose,
+        kernel="gaussian",
+        loss="mse",
+        lr=1e-2,
+        eps=1e-12,
+        max_iter=100,
+        tol=1e-4,
+        min_bandwidth=1e-6,
+        normalize=False,
+        verbose=False,
     ) -> None:
         self.lr = lr
         self.loss = loss
@@ -56,6 +57,7 @@ class AdaptiveGRNN(GRNN):
         self.kernel = kernel
         self.max_iter = max_iter
         self.tol = tol
+        self.min_bandwidth = min_bandwidth
         self.normalize = normalize
         self.verbose = verbose
         self.bandwidth_sharing = "per_feature"
@@ -63,20 +65,22 @@ class AdaptiveGRNN(GRNN):
     def fit(self, X, y):
         X, y = validate_data(self, X, y)
         self.pattern_layer_ = AdaptivePatternLayer(
-            self.kernel,
-            self.bandwidth_sharing,
-            normalize=False,
+            kernel=self.kernel,
+            bandwidth_sharing=self.bandwidth_sharing,
+            normalize=self.normalize,
         ).fit(X)
+        self.summation_layer_ = SummationLayer().fit(y)
         self.optimizer_ = BandwidthOptimizer(
             model=self,
             loss=self.loss,
             lr=self.lr,
             max_iter=self.max_iter,
             tol=self.tol,
+            min_bandwidth=self.min_bandwidth,
             eps=self.eps,
             verbose=self.verbose
         ).optimize()
-        self.summation_layer_ = SummationLayer().fit(y)
+        self.bandwidth_ = self.optimizer_.bandwidth_
         return self
     
     def predict(self, X):

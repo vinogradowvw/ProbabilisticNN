@@ -1,3 +1,4 @@
+from numpy import isin
 import torch
 import torch.nn.functional as F
 from torch.nn import MSELoss, L1Loss
@@ -130,23 +131,39 @@ class BandwidthOptimizer:
 
         Выполняет обучающий LOO forward pass модели.
         """
+        from pnn.pnn import PNN
         y_pred = self.model._forward_train()
-        f = self.model.summation_layer_.last_f_
-        proba = self.model.output_layer_.posteriori(f)
-        return y_pred, f, proba
+        if isinstance(self.model, PNN):
+            f = self.model.summation_layer_.last_f_
+            proba = self.model.output_layer_.posteriori(f)
+            return y_pred, f, proba
+
+        return y_pred, None, None
 
     def optimize(self):
         """Optimize bandwidths and store the best observed parameters.
 
         Оптимизирует ширины и сохраняет лучшие найденные параметры.
         """
+        from pnn.pnn import PNN
         optimizer = torch.optim.Adam(
             [self.model.pattern_layer_.bandwidth_params],
             lr=self.lr
         )
 
         device = self.model.pattern_layer_.patterns_t_.device
-        y_true = torch.as_tensor(self.model.summation_layer_.y_encoded_, dtype=torch.long, device=device)
+        if hasattr(self.model.summation_layer_, "y_encoded_"):
+            y_true = torch.as_tensor(
+                self.model.summation_layer_.y_encoded_,
+                dtype=torch.long,
+                device=device,
+            )
+        else:
+            y_true = torch.as_tensor(
+                self.model.summation_layer_.y_,
+                dtype=torch.float32,
+                device=device,
+            )
 
         self.loss_history_ = []
         self.relative_change_history_ = []
@@ -159,7 +176,10 @@ class BandwidthOptimizer:
             optimizer.zero_grad()
 
             y_pred, f, proba = self._forward_state()
-            loss_value = self.loss_fn_(y_true, y_pred, f, proba, self.eps)
+            if isinstance(self.model, PNN):
+                loss_value = self.loss_fn_(y_true, y_pred, f, proba, self.eps)
+            else:
+                loss_value = self.loss_fn_(y_pred, y_true)
             loss_value.backward()
             optimizer.step()
 
