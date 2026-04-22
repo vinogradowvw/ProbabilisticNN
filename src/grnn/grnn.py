@@ -11,8 +11,8 @@ class GRNN(BaseEstimator, RegressorMixin):
 
     def __init__(
         self,
-        bandwidth,
-        kernel
+        bandwidth=1.0,
+        kernel="gaussian",
     ) -> None:
         self.bandwidth = bandwidth
         self.kernel = kernel
