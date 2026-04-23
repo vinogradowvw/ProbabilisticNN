@@ -28,9 +28,15 @@ def gaussian_kernel(
     _validate_bandwidth_numpy(bandwidth)
 
     bandwidth_sq = bandwidth ** 2
-    if normalized and np.asarray(bandwidth_sq).ndim == 0:  # bandwidth is a scalar
+    if normalized and np.ndim(bandwidth_sq) == 0:  # bandwidth is a scalar
         similarities = np.matmul(X, W.T)
         return np.exp((similarities - 1.0) / bandwidth_sq)
+
+    if np.ndim(bandwidth_sq) == 0:  # bandwidth is a scalar and normalized is False
+        x_norm_sq = np.square(X).sum(axis=1, keepdims=True)  # (batch_size, 1)
+        w_norm_sq = np.square(W).sum(axis=1) # (n_patterns,)
+        l2_norm_sq = x_norm_sq + w_norm_sq - 2.0 * np.matmul(X, W.T)
+        return np.exp(-(l2_norm_sq / (2.0 * bandwidth_sq)))
 
     # bandwidth is an array-like with shape (batch_size, n_patterns, n_features)
     squared_distances = (X[:, np.newaxis, :] - W[np.newaxis, :, :]) ** 2
@@ -52,6 +58,12 @@ def gaussian_kernel_t(
         # bandwidth is a scalar
         similarities = torch.matmul(X, W.T)
         return torch.exp((similarities - 1.0) / bandwidth_sq)
+
+    if (not isinstance(bandwidth_sq, torch.Tensor) or bandwidth_sq.ndim == 0):  # bandwidth is a scalar and normalized is False
+        x_norm_sq = torch.square(X).sum(dim=1, keepdim=True)  # (batch_size, 1)
+        w_norm_sq = torch.square(W).sum(dim=1) # (n_patterns,)
+        l2_norm_sq = x_norm_sq + w_norm_sq - 2.0 * torch.matmul(X, W.T)
+        return torch.exp(-(l2_norm_sq / (2.0 * bandwidth_sq)))
 
     # bandwidth is an array-like with shape (batch_size, n_patterns, n_features)
     squared_distances = (X[:, None, :] - W[None, :, :]) ** 2
