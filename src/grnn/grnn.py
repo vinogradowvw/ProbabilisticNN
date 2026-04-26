@@ -12,9 +12,11 @@ class GRNN(BaseEstimator, RegressorMixin):
         self,
         bandwidth=1.0,
         kernel="gaussian",
+        backend="numpy"
     ) -> None:
         self.bandwidth = bandwidth
         self.kernel = kernel
+        self.backend = backend
 
     def fit(self, X, y):
         X, y = validate_data(self, X, y)

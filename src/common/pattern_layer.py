@@ -2,7 +2,6 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted, validate_data
 import numpy as np
 from base.utils import normalize_l2
-from base.kernels import __resolve_kernel as resolve_kernel
 
 
 class PatternLayer(TransformerMixin, BaseEstimator):
@@ -20,6 +19,7 @@ class PatternLayer(TransformerMixin, BaseEstimator):
         bandwidth: float = 0.5,
         kernel="gaussian",
         normalize: bool = True,
+        backend="numpy",
     ) -> None:
         self.bandwidth = bandwidth
         self.kernel = kernel
@@ -27,7 +27,18 @@ class PatternLayer(TransformerMixin, BaseEstimator):
 
     def fit(self, X, y=None):
         X = validate_data(self, X)
-        self.kernel_ = resolve_kernel(self.kernel)
+        if self.backend == "numba":
+            try:
+                from numba.kernels import __resolve_kernel as resolve_kernel
+            except ImportError as exc:
+                raise ImportError(
+                    "Numba backend is not available. Install it with `pip install probabilisticnn[numba]`."
+                )
+            self.kernel_ = resolve_kernel(self.kernel)
+        if self.backend == "numpy":
+            from base.kernels import __resolve_kernel as resolve_kernel
+            self.kernel_ = resolve_kernel(self.kernel)
+
         self.patterns_ = normalize_l2(X) if self.normalize else X
         return self
 
@@ -64,16 +75,28 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
         self,
         kernel,
         bandwidth_sharing="per_feature",
-        normalize=True
+        normalize=True,
+        backend="numpy",
     ) -> None:
         self.bandwidth_sharing = bandwidth_sharing
         self.kernel = kernel
         self.normalize = normalize
+        self.backend = backend
 
     def fit(self, X, y=None):
         X = validate_data(self, X)
 
-        self.kernel_ = resolve_kernel(self.kernel)
+        if self.backend == "numba":
+            try:
+                from numba.kernels import __resolve_kernel as resolve_kernel
+            except ImportError as exc:
+                raise ImportError(
+                    "Numba backend is not available. Install it with `pip install probabilisticnn[numba]`."
+                )
+            self.kernel_ = resolve_kernel(self.kernel)
+        if self.backend == "numpy":
+            from base.kernels import __resolve_kernel as resolve_kernel
+            self.kernel_ = resolve_kernel(self.kernel)
 
         if self.normalize:
             self.patterns_ = normalize_l2(X)

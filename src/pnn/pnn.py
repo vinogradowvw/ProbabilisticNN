@@ -22,11 +22,13 @@ class PNN(ClassifierMixin, BaseEstimator):
         kernel="gaussian",
         losses="uniform",
         normalize=True,
+        backend="numpy"
     ):
         self.bandwidth = bandwidth
         self.kernel = kernel
         self.losses = losses
         self.normalize = normalize
+        self.backend = backend
 
     def fit(self, X, y):
         """Store training patterns and fit all PNN layers.
@@ -41,6 +43,7 @@ class PNN(ClassifierMixin, BaseEstimator):
             bandwidth=self.bandwidth,
             kernel=self.kernel,
             normalize=self.normalize,
+            backend=self.backend
         ).fit(X)
 
         self.summation_layer_ = SummationLayer().fit(X, y)
@@ -103,6 +106,7 @@ class AdaptivePNN(PNN):
         solver="auto",
         solver_options=None,
         normalize=True,
+        backend="numpy",
     ):
         super().__init__(bandwidth=0, kernel=kernel, losses=losses, normalize=normalize)
         self.loss = loss
@@ -112,6 +116,7 @@ class AdaptivePNN(PNN):
         self.normalize = normalize
         self.solver = solver
         self.solver_options = solver_options
+        self.backend = backend
 
     def fit(
         self,
@@ -132,6 +137,7 @@ class AdaptivePNN(PNN):
             kernel=self.kernel,
             bandwidth_sharing=self.bandwidth_sharing,
             normalize=self.normalize,
+            backend=self.backend
         ).fit(X, y)
         self.summation_layer_ = SummationLayer().fit(X, y)
         self.output_layer_ = OutputLayer(self.losses).fit(y)
