@@ -1,9 +1,6 @@
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted, validate_data
-from torch import nn
-import torch
 import numpy as np
-
 from base.utils import normalize_l2
 from base.kernels import __resolve_kernel as resolve_kernel
 
@@ -77,41 +74,49 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
         X = validate_data(self, X)
 
         self.kernel_ = resolve_kernel(self.kernel)
-        self.kernel_t_ = resolve_kernel(self.kernel, torch=True)
 
         if self.normalize:
             self.patterns_ = normalize_l2(X)
         else:
             self.patterns_ = X
 
-        self.patterns_t_ = torch.as_tensor(self.patterns_, dtype=torch.float32)
         self.feature_size = X.shape[1]
 
         # bandwidth parameter initialization based on the bandwidth_sharing strategy
         if self.bandwidth_sharing == "per_feature":
-            self.bandwidth_params = nn.Parameter(torch.ones(self.feature_size, dtype=torch.float32))
+            # initialization with the std of the pattern data (per-feature)
+            std = np.std(self.patterns_, axis=0) + 1e-12
+            self.bandwidth_params = std
         elif self.bandwidth_sharing == "per_class":
             if y is None:
                 raise ValueError("`y` is required when bandwidth_sharing='per_class'.")
             y = np.asarray(y)
             if y.ndim != 1:
                 y = y.ravel()
-            if y.shape[0] != X.shape[0]:
+            if y.shape[0] != self.patterns_.shape[0]:
                 raise ValueError("`y` must have the same number of samples as `X`.")
             self.classes_, self.y_encoded_ = np.unique(y, return_inverse=True)
             self.n_classes_ = len(self.classes_)
-            self.bandwidth_params = nn.Parameter(torch.ones(self.n_classes_, dtype=torch.float32))
+
+            # initialization with the mean std of the pattern data (per-class)
+            self.bandwidth_params = np.zeros(self.n_classes_)
+            for cl in np.unique(self.y_encoded_):
+                self.bandwidth_params[cl] = np.std(self.patterns_[self.y_encoded_ == cl], axis=0).mean() + 1e-12
         elif self.bandwidth_sharing == "per_class_per_feature":
             if y is None:
                 raise ValueError("`y` is required when bandwidth_sharing='per_class_per_feature'.")
             y = np.asarray(y)
             if y.ndim != 1:
                 y = y.ravel()
-            if y.shape[0] != X.shape[0]:
+            if y.shape[0] != self.patterns_.shape[0]:
                 raise ValueError("`y` must have the same number of samples as `X`.")
             self.classes_, self.y_encoded_  = np.unique(y, return_inverse=True)
             self.n_classes_ = len(self.classes_)
-            self.bandwidth_params = nn.Parameter(torch.ones(self.n_classes_, self.feature_size, dtype=torch.float32))
+
+            # initialization with the std of the pattern data (per-class per-feature)
+            self.bandwidth_params = np.zeros((self.n_classes_, self.feature_size))
+            for cl in np.unique(self.y_encoded_):
+                self.bandwidth_params[cl] = np.std(self.patterns_[self.y_encoded_ == cl], axis=0) + 1e-12
         else:
             raise ValueError(f"Unknown bandwidth_sharing={self.bandwidth_sharing}")
 
@@ -127,26 +132,16 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
             - (n_patterns, 1) при bandwidth_sharing="per_class"
 
         """
-        is_torch = torch.is_tensor(bandwidth_vector)
-
         if self.bandwidth_sharing == "per_feature":
             return bandwidth_vector
         elif self.bandwidth_sharing == "per_class":
             # per class bandwidth_vector shape (n_classes,)
             # параметр ширины для каждого класса с размером (n_classes,)
-            if is_torch:
-                y_idx = torch.as_tensor(self.y_encoded_, dtype=torch.long, device=bandwidth_vector.device)
-                return bandwidth_vector[y_idx].reshape(-1, 1)  # (n_patterns, 1) classes aligned
-            else:
-                return bandwidth_vector[self.y_encoded_].reshape(-1, 1)
+            return bandwidth_vector[self.y_encoded_].reshape(-1, 1)  # (n_patterns, 1) classes aligned
         elif self.bandwidth_sharing == "per_class_per_feature":
             # per class per feature bandwidth_vector shape (n_classes, n_features)
             # параметр ширины для каждого класса по каждому признаку с размером (n_classes, n_features)
-            if is_torch:
-                y_idx = torch.as_tensor(self.y_encoded_, dtype=torch.long, device=bandwidth_vector.device)
-                return bandwidth_vector[y_idx]  # (n_patterns, n_features)  classes aligned
-            else:
-                return bandwidth_vector[self.y_encoded_]  # (n_patterns, n_features)  classes aligned
+            return bandwidth_vector[self.y_encoded_]  # (n_patterns, n_features)  classes aligned
         else:
             raise ValueError(f"Unknown bandwidth_sharing={self.bandwidth_sharing}")
 
@@ -155,13 +150,13 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
         Возвращает матрицу значений ядра для объектов из обучающей выборки с помощью Leave-One-Out (LOO)
         """
         bandwidth = self.__broadcast_bandwidth(self.bandwidth_params)
-        K = self.kernel_t_(
-            self.patterns_t_,
-            self.patterns_t_,
+        K = self.kernel_(
+            self.patterns_,
+            self.patterns_,
             bandwidth=bandwidth,
             normalized=self.normalize,
         )
-        diagonal_mask = 1.0 - torch.eye(K.shape[0], dtype=K.dtype, device=K.device)
+        diagonal_mask = 1.0 - np.eye(K.shape[0])
         return K * diagonal_mask
 
     def transform(self, X):
