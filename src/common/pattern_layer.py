@@ -119,34 +119,26 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
 
     def __broadcast_bandwidth(self, bandwidth_vector):
         """
-        returns a broadcasted bandwidth parameter with shape (n_patterns, n_features)
-        Возвращает раширенный вектор параметров ширины с размером (n_patterns, n_features)
+        Returns bandwidth in the minimal shape required by the kernel.
+        Возвращает вектор параметров ширины в минимальной форме,
+        необходимой для kernel-функции:
+            - (n_patterns, n_features) при bandwidth_sharing="per_class_per_feature"
+            - (n_features,) при bandwidth_sharing="per_feature"
+            - (n_patterns, 1) при bandwidth_sharing="per_class"
+
         """
         is_torch = torch.is_tensor(bandwidth_vector)
 
         if self.bandwidth_sharing == "per_feature":
-            # per feature bandwidth_vector shape (n_features,)
-            # параметр ширины по каждому признаку с размером (n_features,)
-            if is_torch:
-                return bandwidth_vector.unsqueeze(0).expand(self.patterns_t_.shape[0], -1)
-            else:
-                return bandwidth_vector.reshape(1, -1).repeat(self.patterns_.shape[0], axis=0)
+            return bandwidth_vector
         elif self.bandwidth_sharing == "per_class":
             # per class bandwidth_vector shape (n_classes,)
             # параметр ширины для каждого класса с размером (n_classes,)
             if is_torch:
                 y_idx = torch.as_tensor(self.y_encoded_, dtype=torch.long, device=bandwidth_vector.device)
-                return (
-                    bandwidth_vector[y_idx]  # (n_patterns,) classes aligned
-                    .unsqueeze(-1)  # (n_patterns, 1)
-                    .expand(self.patterns_t_.shape[0], self.patterns_.shape[1])  # (n_patterns, n_features)
-                )
+                return bandwidth_vector[y_idx].reshape(-1, 1)  # (n_patterns, 1) classes aligned
             else:
-                return (
-                    bandwidth_vector[self.y_encoded_]
-                    .reshape(-1, 1)
-                    .repeat(self.patterns_.shape[1], axis=1)
-                )
+                return bandwidth_vector[self.y_encoded_].reshape(-1, 1)
         elif self.bandwidth_sharing == "per_class_per_feature":
             # per class per feature bandwidth_vector shape (n_classes, n_features)
             # параметр ширины для каждого класса по каждому признаку с размером (n_classes, n_features)
