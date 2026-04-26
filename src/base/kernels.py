@@ -7,6 +7,12 @@ def _validate_bandwidth_numpy(bandwidth) -> None:
         raise ValueError("`bandwidth` must be strictly positive.")
 
 
+def _exp_from_scaled_distance(scaled_distance):
+    """Exponentiate a theoretically non-negative scaled distance safely."""
+    scaled_distance = np.maximum(np.asarray(scaled_distance, dtype=np.float64), 0.0)
+    return np.exp(-scaled_distance)
+
+
 def gaussian_kernel(
     X: np.ndarray,
     W: np.ndarray,
@@ -19,13 +25,15 @@ def gaussian_kernel(
     bandwidth_sq = np.square(np.asarray(bandwidth))
     if normalized and np.ndim(bandwidth_sq) == 0:  # bandwidth is a scalar
         similarities = np.matmul(X, W.T)
-        return np.exp((similarities - 1.0) / bandwidth_sq)
+        scaled_distance = (1.0 - similarities) / bandwidth_sq
+        return _exp_from_scaled_distance(scaled_distance)
 
     if np.ndim(bandwidth_sq) == 0:  # bandwidth is a scalar and normalized is False
         x_norm_sq = np.square(X).sum(axis=1, keepdims=True)  # (batch_size, 1)
         w_norm_sq = np.square(W).sum(axis=1) # (n_patterns,)
         l2_norm_sq = x_norm_sq + w_norm_sq - 2.0 * np.matmul(X, W.T)
-        return np.exp(-(l2_norm_sq / (2.0 * bandwidth_sq)))
+        scaled_distance = l2_norm_sq / (2.0 * bandwidth_sq)
+        return _exp_from_scaled_distance(scaled_distance)
     
     if np.ndim(bandwidth_sq) == 1:
         if bandwidth_sq.shape[0] == W.shape[1]:  # bandwidth shape is (n_features,)
@@ -38,11 +46,8 @@ def gaussian_kernel(
                 (np.square(W) * bandw_inv)  # per-feature bandwidth normalization
                 .sum(axis=1)  # (n_patterns,)
             )
-            return (
-                np.exp(
-                    -(x_norm_sq + w_norm_sq - 2.0 * np.matmul(X, (W * bandw_inv).T))
-                )
-            )
+            scaled_distance = x_norm_sq + w_norm_sq - 2.0 * np.matmul(X, (W * bandw_inv).T)
+            return _exp_from_scaled_distance(scaled_distance)
         else:
             raise ValueError(
                 "Invadid bandwidth shape. Expected (n_features,), (n_patterns,) or (n_patterns, n_features), got {}".format(bandwidth_sq.shape)
@@ -53,14 +58,14 @@ def gaussian_kernel(
             bandw_inv = 1 / (2 * bandwidth_sq) # (n_patterns, n_features)
             x_norm_sq = np.matmul(np.square(X), bandw_inv.T)  # (batch_size, n_patterns)
             w_norm_sq = (np.square(W) * bandw_inv).sum(axis=1) # (n_patterns,)
-            l2_norm_sq = x_norm_sq + w_norm_sq - 2.0 * np.matmul(X, (W * bandw_inv).T)  # (batch_size, n_patterns)
-            return np.exp(-(l2_norm_sq))
+            scaled_distance = x_norm_sq + w_norm_sq - 2.0 * np.matmul(X, (W * bandw_inv).T)
+            return _exp_from_scaled_distance(scaled_distance)
         elif bandwidth_sq.shape[0] == W.shape[0] and bandwidth_sq.shape[1] == 1:  # bandwidth shape is (n_patterns, 1) per-class
             bandw_inv = 1 / (2 * bandwidth_sq.squeeze()) # (n_patterns,)
             x_norm_sq = np.square(X).sum(axis=1, keepdims=True)  # (batch_size, 1)
             w_norm_sq = np.square(W).sum(axis=1) # (n_patterns,)
-            l2_norm_sq = x_norm_sq + w_norm_sq - 2.0 * np.matmul(X, W.T)  # (batch_size, n_patterns)
-            return np.exp(-(l2_norm_sq * bandw_inv))
+            scaled_distance = (x_norm_sq + w_norm_sq - 2.0 * np.matmul(X, W.T)) * bandw_inv
+            return _exp_from_scaled_distance(scaled_distance)
         else:
             raise ValueError(
                 "Invadid bandwidth shape. Expected (n_features,), (n_patterns,) or (n_patterns, n_features), got {}".format(bandwidth_sq.shape)

@@ -54,13 +54,21 @@ class OutputLayer:
         self.likelihood_multiplier_ = self.prior_ * losses
         return self
 
-    def transform(self, f):
+    def transform_encoded(self, f):
+        """Predict encoded class indices from class densities.
+
+        Предсказывает закодированные индексы классов по значениям плотности.
+        """
         posterior = f * self.likelihood_multiplier_
-        classes_enc = np.argmax(posterior, axis=1)
+        return np.argmax(posterior, axis=1)
+
+    def transform(self, f):
+        classes_enc = self.transform_encoded(f)
         classes = self.classes_[classes_enc]
         return classes
 
     def posteriori(self, f):
         nom = self.prior_ * f
         denom = np.sum(nom, axis=1, keepdims=True)
-        return nom / denom
+        fallback = np.broadcast_to(self.prior_, nom.shape).copy()
+        return np.divide(nom, denom, out=fallback, where=denom > 0)

@@ -1,6 +1,5 @@
 from base.optim import BandwidthOptimizer
 from common import AdaptivePatternLayer
-import numpy as np
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.utils.validation import check_is_fitted, validate_data
 from common.pattern_layer import PatternLayer
@@ -43,24 +42,18 @@ class AdaptiveGRNN(GRNN):
         self, 
         kernel="gaussian",
         loss="mse",
-        lr=1e-2,
-        eps=1e-12,
         max_iter=100,
-        tol=1e-4,
-        min_bandwidth=1e-6,
+        solver="auto",
+        solver_options=None,
         normalize=False,
-        verbose=False,
     ) -> None:
-        self.lr = lr
         self.loss = loss
-        self.eps = eps
         self.kernel = kernel
         self.max_iter = max_iter
-        self.tol = tol
-        self.min_bandwidth = min_bandwidth
         self.normalize = normalize
-        self.verbose = verbose
         self.bandwidth_sharing = "per_feature"
+        self.solver = solver
+        self.solver_options = solver_options
 
     def fit(self, X, y):
         X, y = validate_data(self, X, y)
@@ -73,12 +66,9 @@ class AdaptiveGRNN(GRNN):
         self.optimizer_ = BandwidthOptimizer(
             model=self,
             loss=self.loss,
-            lr=self.lr,
             max_iter=self.max_iter,
-            tol=self.tol,
-            min_bandwidth=self.min_bandwidth,
-            eps=self.eps,
-            verbose=self.verbose
+            solver=self.solver,
+            solver_options=self.solver_options,
         ).optimize()
         self.bandwidth_ = self.optimizer_.bandwidth_
         return self
@@ -90,7 +80,7 @@ class AdaptiveGRNN(GRNN):
         out = self.summation_layer_.transform(K)
         return out
 
-    def _forward_train(self):
-        K_loo = self.pattern_layer_._loo()
+    def _forward_train(self, bandwidth = None):
+        K_loo = self.pattern_layer_._loo(bandwidth)
         out = self.summation_layer_.transform(K_loo)
         return out

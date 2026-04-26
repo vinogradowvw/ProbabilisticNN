@@ -99,25 +99,19 @@ class AdaptivePNN(PNN):
         losses="uniform",
         loss="correct_class_probability",
         bandwidth_sharing="per_feature",
-        lr=1e-2,
         max_iter=100,
-        tol=1e-4,
-        min_bandwidth=1e-6,
-        eps=1e-12,
+        solver="auto",
+        solver_options=None,
         normalize=True,
-        verbose=False,
     ):
         super().__init__(bandwidth=0, kernel=kernel, losses=losses, normalize=normalize)
         self.loss = loss
         self.bandwidth_sharing = bandwidth_sharing
-        self.lr = lr
         self.max_iter = max_iter
-        self.tol = tol
-        self.min_bandwidth = min_bandwidth
-        self.eps = eps
         self.eval_mode = False
-        self.verbose = verbose
         self.normalize = normalize
+        self.solver = solver
+        self.solver_options = solver_options
 
     def fit(
         self,
@@ -145,29 +139,30 @@ class AdaptivePNN(PNN):
         # Bandwidth optimizer runs the LOO training objective.
         # Оптимизатор ширин запускает обучающую LOO-цель.
         self.optimizer_ = BandwidthOptimizer(
-            self,
-            self.loss,
-            self.lr,
-            self.max_iter,
-            self.tol,
-            self.min_bandwidth,
-            self.eps,
-            self.verbose
-        )
-
-        self.optimizer_.optimize()
+            model=self,
+            loss=self.loss,
+            max_iter=self.max_iter,
+            solver=self.solver,
+            solver_options=self.solver_options,
+        ).optimize()
+        self.bandwidth_ = self.optimizer_.bandwidth_
 
         return self
 
-    def _forward_train(self, return_proba=False):
+    def _forward_train(self, bandwidth=None, return_proba=False, return_encoded=False):
         """Run Leave-One-Out forward pass on the training set.
 
         Выполняет Leave-One-Out forward pass на обучающей выборке.
         """
-        K_loo = self.pattern_layer_._loo()
+        if return_proba and return_encoded:
+            raise ValueError("`return_proba` and `return_encoded` cannot both be True.")
+
+        K_loo = self.pattern_layer_._loo(bandwidth)
         f = self.summation_layer_.transform(K_loo)
         if return_proba:
             out = self.output_layer_.posteriori(f)
+        elif return_encoded:
+            out = self.output_layer_.transform_encoded(f)
         else:
             out = self.output_layer_.transform(f)
 

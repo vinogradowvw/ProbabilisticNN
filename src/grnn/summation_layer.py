@@ -9,5 +9,5 @@ class SummationLayer:
     def transform(self, K):
         denom = np.sum(K, axis=1)
         nom = np.matmul(K, self.y_)
-        out = nom / denom
+        out = np.divide(nom, denom, out=np.zeros_like(nom, dtype=np.float64), where=denom > 0)
         return out

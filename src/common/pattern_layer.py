@@ -119,7 +119,6 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
                 self.bandwidth_params[cl] = np.std(self.patterns_[self.y_encoded_ == cl], axis=0) + 1e-12
         else:
             raise ValueError(f"Unknown bandwidth_sharing={self.bandwidth_sharing}")
-
         return self
 
     def __broadcast_bandwidth(self, bandwidth_vector):
@@ -145,19 +144,62 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
         else:
             raise ValueError(f"Unknown bandwidth_sharing={self.bandwidth_sharing}")
 
-    def _loo(self):
+    def _prepare_bandwidth(self, bandwidth):
+        """Normalize raw bandwidth parameters to the kernel-ready shape.
+
+        Приводит параметры ширины к форме, которую ожидает kernel-функция.
+        """
+        bandwidth = np.asarray(bandwidth, dtype=np.float64)
+        n_patterns = self.patterns_.shape[0]
+
+        if self.bandwidth_sharing == "per_feature":
+            expected_shape = (self.feature_size,)
+            if bandwidth.shape != expected_shape:
+                raise ValueError(
+                    f"Invalid bandwidth shape for 'per_feature': expected {expected_shape}, got {bandwidth.shape}."
+                )
+            return bandwidth
+
+        if self.bandwidth_sharing == "per_class":
+            raw_shape = (self.n_classes_,)
+            broadcast_shape = (n_patterns, 1)
+            if bandwidth.shape == raw_shape:
+                return self.__broadcast_bandwidth(bandwidth)
+            if bandwidth.shape == broadcast_shape:
+                return bandwidth
+            raise ValueError(
+                f"Invalid bandwidth shape for 'per_class': expected {raw_shape} or {broadcast_shape}, got {bandwidth.shape}."
+            )
+
+        if self.bandwidth_sharing == "per_class_per_feature":
+            raw_shape = (self.n_classes_, self.feature_size)
+            broadcast_shape = (n_patterns, self.feature_size)
+            if bandwidth.shape == raw_shape:
+                return self.__broadcast_bandwidth(bandwidth)
+            if bandwidth.shape == broadcast_shape:
+                return bandwidth
+            raise ValueError(
+                "Invalid bandwidth shape for 'per_class_per_feature': "
+                f"expected {raw_shape} or {broadcast_shape}, got {bandwidth.shape}."
+            )
+
+        raise ValueError(f"Unknown bandwidth_sharing={self.bandwidth_sharing}")
+
+    def _loo(self, bandwidth = None):
         """Returns the kernel matrix for the Leave-One-Out (LOO)
         Возвращает матрицу значений ядра для объектов из обучающей выборки с помощью Leave-One-Out (LOO)
         """
-        bandwidth = self.__broadcast_bandwidth(self.bandwidth_params)
+        if bandwidth is None:
+            bandwidth = self.bandwidth_params
+        bandwidth = self._prepare_bandwidth(bandwidth)
         K = self.kernel_(
             self.patterns_,
             self.patterns_,
             bandwidth=bandwidth,
             normalized=self.normalize,
         )
-        diagonal_mask = 1.0 - np.eye(K.shape[0])
-        return K * diagonal_mask
+        np.fill_diagonal(K, 0.0)
+        return K
 
     def transform(self, X):
         check_is_fitted(self, ["kernel_", "patterns_", "converged_", "bandwidth_"])
@@ -166,7 +208,7 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
             X_transformed = normalize_l2(X)
         else:
             X_transformed = X
-        bandwidth = self.__broadcast_bandwidth(np.asarray(self.bandwidth_))
+        bandwidth = self._prepare_bandwidth(self.bandwidth_)
         return self.kernel_(
             X_transformed,
             self.patterns_,
