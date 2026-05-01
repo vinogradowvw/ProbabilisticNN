@@ -1,3 +1,4 @@
+from base.utils import cast_to_dtype
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import validate_data, check_is_fitted
@@ -36,18 +37,23 @@ class SummationLayer(BaseEstimator, TransformerMixin):
 
 
 class OutputLayer:
-    def __init__(self, losses):
+    def __init__(
+        self,
+        losses,
+        compute_dtype
+    ):
         self.losses = losses
+        self.compute_dtype = compute_dtype
 
     def fit(self, y):
         self.classes_, self.y_encoded_, counts = np.unique(y, return_inverse=True, return_counts=True)
         self.n_classes_ = len(self.classes_)
-        self.prior_ = np.asarray((counts / counts.sum()), dtype=y.dtype)
+        self.prior_ = cast_to_dtype(counts / counts.sum(), self.compute_dtype)
 
         if self.losses == "uniform":
-            losses = np.ones(self.n_classes_, dtype=y.dtype)
+            losses = cast_to_dtype(np.ones(self.n_classes_), self.compute_dtype)
         else:
-            losses = np.asarray(self.losses, dtype=y.dtype)
+            losses = cast_to_dtype(self.losses, self.compute_dtype)
             if losses.shape != (self.n_classes_,):
                 raise ValueError("`losses` must have one value per class.")
 

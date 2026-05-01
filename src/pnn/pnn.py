@@ -54,7 +54,7 @@ class PNN(ClassifierMixin, BaseEstimator):
         ).fit(X)
 
         self.summation_layer_ = SummationLayer().fit(X, y)
-        self.output_layer_ = OutputLayer(self.losses).fit(y)
+        self.output_layer_ = OutputLayer(self.losses, self.compute_dtype).fit(y)
 
         return self
 
@@ -182,7 +182,7 @@ class AdaptivePNN(PNN):
             compute_dtype=self.compute_dtype,
         ).fit(X, y)
         self.summation_layer_ = SummationLayer().fit(X, y)
-        self.output_layer_ = OutputLayer(self.losses).fit(y)
+        self.output_layer_ = OutputLayer(self.losses, self.compute_dtype).fit(y)
 
         # Bandwidth optimizer runs the LOO training objective.
         # Оптимизатор ширин запускает обучающую LOO-цель.
