@@ -16,7 +16,7 @@ class SummationLayer(BaseEstimator, TransformerMixin):
         self.n_train_ = n_train
 
         # class_mask[i, j] = 1, если i-й обучающий объект принадлежит j-му классу.
-        self.class_mask_ = np.zeros((n_train, self.n_classes_), dtype=float)
+        self.class_mask_ = np.zeros((n_train, self.n_classes_), dtype=X.dtype)
         self.class_mask_[np.arange(n_train), self.y_encoded_] = 1.0
         return self
 
@@ -42,12 +42,12 @@ class OutputLayer:
     def fit(self, y):
         self.classes_, self.y_encoded_, counts = np.unique(y, return_inverse=True, return_counts=True)
         self.n_classes_ = len(self.classes_)
-        self.prior_ = counts / counts.sum()
+        self.prior_ = np.asarray((counts / counts.sum()), dtype=y.dtype)
 
         if self.losses == "uniform":
-            losses = np.ones(self.n_classes_, dtype=float)
+            losses = np.ones(self.n_classes_, dtype=y.dtype)
         else:
-            losses = np.asarray(self.losses, dtype=float)
+            losses = np.asarray(self.losses, dtype=y.dtype)
             if losses.shape != (self.n_classes_,):
                 raise ValueError("`losses` must have one value per class.")
 
@@ -59,7 +59,8 @@ class OutputLayer:
 
         Предсказывает закодированные индексы классов по значениям плотности.
         """
-        posterior = f * self.likelihood_multiplier_
+        likelihood_multiplier = np.asarray(self.likelihood_multiplier_, dtype=f.dtype)
+        posterior = f * likelihood_multiplier
         return np.argmax(posterior, axis=1)
 
     def transform(self, f):
@@ -68,7 +69,8 @@ class OutputLayer:
         return classes
 
     def posteriori(self, f):
-        nom = self.prior_ * f
+        prior = np.asarray(self.prior_, dtype=f.dtype)
+        nom = prior * f
         denom = np.sum(nom, axis=1, keepdims=True)
-        fallback = np.broadcast_to(self.prior_, nom.shape).copy()
+        fallback = np.broadcast_to(prior, nom.shape).copy()
         return np.divide(nom, denom, out=fallback, where=denom > 0)

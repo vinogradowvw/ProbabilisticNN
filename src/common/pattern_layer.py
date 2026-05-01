@@ -2,6 +2,8 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted, validate_data
 import numpy as np
 from base.utils import normalize_l2
+from base.utils import cast_to_dtype
+from base.utils import as_bandwidth_array
 
 
 class PatternLayer(TransformerMixin, BaseEstimator):
@@ -19,37 +21,30 @@ class PatternLayer(TransformerMixin, BaseEstimator):
         bandwidth: float = 0.5,
         kernel="gaussian",
         normalize: bool = True,
-        backend="numpy",
+        backend="numpy"
     ) -> None:
         self.bandwidth = bandwidth
         self.kernel = kernel
         self.normalize = normalize
+        self.backend = backend
 
     def fit(self, X, y=None):
-        X = validate_data(self, X)
-        if self.backend == "numba":
-            try:
-                from numba.kernels import __resolve_kernel as resolve_kernel
-            except ImportError as exc:
-                raise ImportError(
-                    "Numba backend is not available. Install it with `pip install probabilisticnn[numba]`."
-                )
-            self.kernel_ = resolve_kernel(self.kernel)
-        if self.backend == "numpy":
-            from base.kernels import __resolve_kernel as resolve_kernel
-            self.kernel_ = resolve_kernel(self.kernel)
+        from base.kernels import resolve_kernel
+        self.kernel_ = resolve_kernel(self.kernel)
 
+        self.bandwidth_ = as_bandwidth_array(self.bandwidth)
         self.patterns_ = normalize_l2(X) if self.normalize else X
         return self
 
     def transform(self, X):
-        check_is_fitted(self, ["kernel_", "patterns_"])
+        check_is_fitted(self, ["kernel_", "patterns_", "bandwidth_"])
         X = validate_data(self, X, reset=False)
-        X_transformed = normalize_l2(X) if self.normalize else X
+        X_transformed = normalize_l2(X) if self.normalize else X.copy()
         return self.kernel_(
             X_transformed,
             self.patterns_,
-            bandwidth=self.bandwidth,
+            bandwidth=self.bandwidth_,
+            bandwidth_sharing="scalar",
             normalized=self.normalize,
         )
 
@@ -77,26 +72,19 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
         bandwidth_sharing="per_feature",
         normalize=True,
         backend="numpy",
+        compute_dtype="auto",
     ) -> None:
         self.bandwidth_sharing = bandwidth_sharing
         self.kernel = kernel
         self.normalize = normalize
         self.backend = backend
+        self.compute_dtype = compute_dtype
 
     def fit(self, X, y=None):
         X = validate_data(self, X)
 
-        if self.backend == "numba":
-            try:
-                from numba.kernels import __resolve_kernel as resolve_kernel
-            except ImportError as exc:
-                raise ImportError(
-                    "Numba backend is not available. Install it with `pip install probabilisticnn[numba]`."
-                )
-            self.kernel_ = resolve_kernel(self.kernel)
-        if self.backend == "numpy":
-            from base.kernels import __resolve_kernel as resolve_kernel
-            self.kernel_ = resolve_kernel(self.kernel)
+        from base.kernels import resolve_kernel
+        self.kernel_ = resolve_kernel(self.kernel)
 
         if self.normalize:
             self.patterns_ = normalize_l2(X)
@@ -108,7 +96,7 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
         # bandwidth parameter initialization based on the bandwidth_sharing strategy
         if self.bandwidth_sharing == "per_feature":
             # initialization with the std of the pattern data (per-feature)
-            std = np.std(self.patterns_, axis=0) + 1e-12
+            std = cast_to_dtype(np.std(self.patterns_, axis=0), self.compute_dtype) + 1e-12
             self.bandwidth_params = std
         elif self.bandwidth_sharing == "per_class":
             if y is None:
@@ -122,9 +110,18 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
             self.n_classes_ = len(self.classes_)
 
             # initialization with the mean std of the pattern data (per-class)
-            self.bandwidth_params = np.zeros(self.n_classes_)
+            self.bandwidth_params = cast_to_dtype(np.zeros(self.n_classes_), self.compute_dtype)
             for cl in np.unique(self.y_encoded_):
-                self.bandwidth_params[cl] = np.std(self.patterns_[self.y_encoded_ == cl], axis=0).mean() + 1e-12
+                self.bandwidth_params[cl] = (
+                    cast_to_dtype(
+                        np.std(
+                            self.patterns_[self.y_encoded_ == cl],
+                            axis=0,
+                        ).mean(),
+                        self.compute_dtype,
+                    )
+                    + 1e-12
+                )
         elif self.bandwidth_sharing == "per_class_per_feature":
             if y is None:
                 raise ValueError("`y` is required when bandwidth_sharing='per_class_per_feature'.")
@@ -137,9 +134,20 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
             self.n_classes_ = len(self.classes_)
 
             # initialization with the std of the pattern data (per-class per-feature)
-            self.bandwidth_params = np.zeros((self.n_classes_, self.feature_size))
+            self.bandwidth_params = cast_to_dtype(
+                np.zeros((self.n_classes_, self.feature_size)),
+                self.compute_dtype,
+            )
             for cl in np.unique(self.y_encoded_):
-                self.bandwidth_params[cl] = np.std(self.patterns_[self.y_encoded_ == cl], axis=0) + 1e-12
+                self.bandwidth_params[cl] = (
+                    cast_to_dtype(
+                        np.std(
+                            self.patterns_[self.y_encoded_ == cl],
+                            axis=0,
+                        ),
+                        self.compute_dtype,
+                    ) + 1e-12
+                )
         else:
             raise ValueError(f"Unknown bandwidth_sharing={self.bandwidth_sharing}")
         return self
@@ -151,7 +159,7 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
         необходимой для kernel-функции:
             - (n_patterns, n_features) при bandwidth_sharing="per_class_per_feature"
             - (n_features,) при bandwidth_sharing="per_feature"
-            - (n_patterns, 1) при bandwidth_sharing="per_class"
+            - (n_patterns,) при bandwidth_sharing="per_class"
 
         """
         if self.bandwidth_sharing == "per_feature":
@@ -159,7 +167,7 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
         elif self.bandwidth_sharing == "per_class":
             # per class bandwidth_vector shape (n_classes,)
             # параметр ширины для каждого класса с размером (n_classes,)
-            return bandwidth_vector[self.y_encoded_].reshape(-1, 1)  # (n_patterns, 1) classes aligned
+            return bandwidth_vector[self.y_encoded_]  # (n_patterns,) classes aligned
         elif self.bandwidth_sharing == "per_class_per_feature":
             # per class per feature bandwidth_vector shape (n_classes, n_features)
             # параметр ширины для каждого класса по каждому признаку с размером (n_classes, n_features)
@@ -172,7 +180,7 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
 
         Приводит параметры ширины к форме, которую ожидает kernel-функция.
         """
-        bandwidth = np.asarray(bandwidth, dtype=np.float64)
+        bandwidth = cast_to_dtype(np.asarray(bandwidth), self.compute_dtype)
         n_patterns = self.patterns_.shape[0]
 
         if self.bandwidth_sharing == "per_feature":
@@ -219,6 +227,7 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
             self.patterns_,
             self.patterns_,
             bandwidth=bandwidth,
+            bandwidth_sharing=self.bandwidth_sharing,
             normalized=self.normalize,
         )
         np.fill_diagonal(K, 0.0)
@@ -236,5 +245,6 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
             X_transformed,
             self.patterns_,
             bandwidth=bandwidth,
+            bandwidth_sharing=self.bandwidth_sharing,
             normalized=self.normalize,
         )

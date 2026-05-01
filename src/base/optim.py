@@ -4,6 +4,7 @@ import numpy as np
 from scipy.optimize import minimize
 
 from base.loss import _resolve_loss
+from base.utils import cast_to_dtype
 
 
 SOLVER_REGISTRY = {
@@ -46,9 +47,22 @@ class BandwidthOptimizer:
         self.solver_options = solver_options
 
     def _is_pnn_model(self):
-        from pnn.pnn import PNN
+        if not hasattr(self, "is_pnn_model"):
+            from pnn.pnn import PNN
+            self.is_pnn_model = isinstance(self.model, PNN)
+        return self.is_pnn_model
 
-        return isinstance(self.model, PNN)
+    def _infer_dtype(self):
+        compute_dtype = getattr(self.model, "compute_dtype", "auto")
+        if compute_dtype in {"float32", "float64"}:
+            return compute_dtype
+
+        pattern_dtype = getattr(self.model.pattern_layer_.patterns_, "dtype", None)
+        if pattern_dtype == np.float32:
+            return "float32"
+        if pattern_dtype == np.float64:
+            return "float64"
+        return "auto"
 
     def _forward_state(self, bandwidth):
         """Run the model's LOO training forward pass.
@@ -136,7 +150,7 @@ class BandwidthOptimizer:
             },
         )
 
-        bandwidth = self._unpack_bandwidth(result.x)
+        bandwidth = cast_to_dtype(self._unpack_bandwidth(result.x), self._infer_dtype())
 
         self.solver_ = self.solver
         self.optimization_result_ = result
