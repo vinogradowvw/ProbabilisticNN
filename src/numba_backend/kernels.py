@@ -21,15 +21,16 @@ def _gaussian_kernel_scalar_bandw(
     bandwidth_sq = bandwidth * bandwidth
     if normalized:
         similarities = np.dot(X, W.T)
-        scaled_distance = (1.0 - similarities) / bandwidth_sq
-        scaled_distance = np.maximum(scaled_distance, 0.0)
+        scaled_distance = (np.ones_like(similarities) - similarities) / bandwidth_sq
+        scaled_distance = np.maximum(scaled_distance, np.zeros_like(scaled_distance))
         return np.exp(-scaled_distance)
 
     x_norm_sq = np.square(X).sum(axis=1).reshape((X.shape[0], 1))
     w_norm_sq = np.square(W).sum(axis=1)
-    l2_norm_sq = x_norm_sq + w_norm_sq - 2.0 * np.dot(X, W.T)
-    scaled_distance = l2_norm_sq / (2.0 * bandwidth_sq)
-    scaled_distance = np.maximum(scaled_distance, 0.0)
+    cross_term = np.dot(X, W.T)
+    l2_norm_sq = x_norm_sq + w_norm_sq - (cross_term + cross_term)
+    scaled_distance = l2_norm_sq / (bandwidth_sq + bandwidth_sq)
+    scaled_distance = np.maximum(scaled_distance, np.zeros_like(scaled_distance))
     return np.exp(-scaled_distance)
 
 
@@ -41,7 +42,7 @@ def _gaussian_kernel_per_feature(
     normalized: bool = False,
 ) -> np.ndarray:
     bandwidth_sq = np.square(bandwidth)
-    bandw_inv = 1.0 / (2.0 * bandwidth_sq)
+    bandw_inv = np.reciprocal(bandwidth_sq + bandwidth_sq)
     x_norm_sq = (
         (np.square(X) * bandw_inv)
         .sum(axis=1)
@@ -51,8 +52,9 @@ def _gaussian_kernel_per_feature(
         (np.square(W) * bandw_inv)
         .sum(axis=1)
     )
-    scaled_distance = x_norm_sq + w_norm_sq - 2.0 * np.dot(X, (W * bandw_inv).T)
-    scaled_distance = np.maximum(scaled_distance, 0.0)
+    cross_term = np.dot(X, (W * bandw_inv).T)
+    scaled_distance = x_norm_sq + w_norm_sq - (cross_term + cross_term)
+    scaled_distance = np.maximum(scaled_distance, np.zeros_like(scaled_distance))
     return np.exp(-scaled_distance)
 
 
@@ -64,11 +66,12 @@ def _gaussian_kernel_per_class(
     normalized: bool = False,
 ) -> np.ndarray:
     bandwidth_sq = np.square(bandwidth)
-    bandw_inv = 1.0 / (2.0 * bandwidth_sq)
+    bandw_inv = np.reciprocal(bandwidth_sq + bandwidth_sq)
     x_norm_sq = np.square(X).sum(axis=1).reshape((X.shape[0], 1))
     w_norm_sq = np.square(W).sum(axis=1)
-    scaled_distance = (x_norm_sq + w_norm_sq - 2.0 * np.dot(X, W.T)) * bandw_inv
-    scaled_distance = np.maximum(scaled_distance, 0.0)
+    cross_term = np.dot(X, W.T)
+    scaled_distance = (x_norm_sq + w_norm_sq - (cross_term + cross_term)) * bandw_inv
+    scaled_distance = np.maximum(scaled_distance, np.zeros_like(scaled_distance))
     return np.exp(-scaled_distance)
 
 
@@ -80,11 +83,12 @@ def _gaussian_kernel_per_class_per_feature(
     normalized: bool = False,
 ) -> np.ndarray:
     bandwidth_sq = np.square(bandwidth)
-    bandw_inv = 1.0 / (2.0 * bandwidth_sq)
+    bandw_inv = np.reciprocal(bandwidth_sq + bandwidth_sq)
     x_norm_sq = np.dot(np.square(X), bandw_inv.T)
     w_norm_sq = (np.square(W) * bandw_inv).sum(axis=1)
-    scaled_distance = x_norm_sq + w_norm_sq - 2.0 * np.dot(X, (W * bandw_inv).T)
-    scaled_distance = np.maximum(scaled_distance, 0.0)
+    cross_term = np.dot(X, (W * bandw_inv).T)
+    scaled_distance = x_norm_sq + w_norm_sq - (cross_term + cross_term)
+    scaled_distance = np.maximum(scaled_distance, np.zeros_like(scaled_distance))
     return np.exp(-scaled_distance)
 # ------------------------------------------------------------------------------
 
@@ -101,7 +105,7 @@ def _laplacian_kernel_scalar_bandw(
 ) -> np.ndarray:
     l1_norm = np.abs(X[:, None, :] - W[None, :, :]).sum(axis=2)
     scaled_distance = l1_norm / bandwidth
-    scaled_distance = np.maximum(scaled_distance, 0.0)
+    scaled_distance = np.maximum(scaled_distance, np.zeros_like(scaled_distance))
     return np.exp(-scaled_distance)
 
 
@@ -116,7 +120,7 @@ def _laplacian_kernel_per_feature(
         np.abs(X[:, None, :] / bandwidth - W[None, :, :] / bandwidth)
         .sum(axis=2)
     )
-    l1_norm_normalized = np.maximum(l1_norm_normalized, 0.0)
+    l1_norm_normalized = np.maximum(l1_norm_normalized, np.zeros_like(l1_norm_normalized))
     return np.exp(-l1_norm_normalized)
 
 
@@ -129,7 +133,7 @@ def _laplacian_kernel_per_class(
 ) -> np.ndarray:
     l1_norm = np.abs(X[:, None, :] - W[None, :, :]).sum(axis=2)
     scaled_distance = l1_norm / bandwidth
-    scaled_distance = np.maximum(scaled_distance, 0.0)
+    scaled_distance = np.maximum(scaled_distance, np.zeros_like(scaled_distance))
     return np.exp(-scaled_distance)
 
 
@@ -144,7 +148,7 @@ def _laplacian_kernel_per_class_per_feature(
         np.abs((X[:, None, :] - W[None, :, :]) / bandwidth)
         .sum(axis=2)
     )
-    l1_norm_normalized = np.maximum(l1_norm_normalized, 0.0)
+    l1_norm_normalized = np.maximum(l1_norm_normalized, np.zeros_like(l1_norm_normalized))
     return np.exp(-l1_norm_normalized)
 # ------------------------------------------------------------------------------
 
@@ -160,18 +164,23 @@ def _exponential_kernel_scalar_bandw(
     normalized: bool = False,
 ) -> np.ndarray:
     if normalized:
-        l2_norm = np.sqrt(2.0 * (1.0 - np.dot(X, W.T)))
+        similarities = np.dot(X, W.T)
+        l2_norm_sq = np.ones_like(similarities) - similarities
+        l2_norm_sq = l2_norm_sq + l2_norm_sq
+        l2_norm_sq = np.maximum(l2_norm_sq, np.zeros_like(l2_norm_sq))
+        l2_norm = np.sqrt(l2_norm_sq)
         scaled_distance = l2_norm / bandwidth
-        scaled_distance = np.maximum(scaled_distance, 0.0)
+        scaled_distance = np.maximum(scaled_distance, np.zeros_like(scaled_distance))
         return np.exp(-scaled_distance)
 
     x_norm_sq = np.square(X).sum(axis=1).reshape((X.shape[0], 1))
     w_norm_sq = np.square(W).sum(axis=1)
-    l2_norm_sq = x_norm_sq + w_norm_sq - 2.0 * np.dot(X, W.T)
-    l2_norm_sq = np.maximum(l2_norm_sq, 0.0)
+    cross_term = np.dot(X, W.T)
+    l2_norm_sq = x_norm_sq + w_norm_sq - (cross_term + cross_term)
+    l2_norm_sq = np.maximum(l2_norm_sq, np.zeros_like(l2_norm_sq))
     l2_norm = np.sqrt(l2_norm_sq)
     scaled_distance = l2_norm / bandwidth
-    scaled_distance = np.maximum(scaled_distance, 0.0)
+    scaled_distance = np.maximum(scaled_distance, np.zeros_like(scaled_distance))
     return np.exp(-scaled_distance)
 
 
@@ -186,10 +195,11 @@ def _exponential_kernel_per_feature(
     w_scaled = W / bandwidth
     x_norm_sq = np.square(x_scaled).sum(axis=1).reshape((X.shape[0], 1))
     w_norm_sq = np.square(w_scaled).sum(axis=1)
-    scaled_distance_sq = x_norm_sq + w_norm_sq - 2.0 * np.dot(x_scaled, w_scaled.T)
-    scaled_distance_sq = np.maximum(scaled_distance_sq, 0.0)
+    cross_term = np.dot(x_scaled, w_scaled.T)
+    scaled_distance_sq = x_norm_sq + w_norm_sq - (cross_term + cross_term)
+    scaled_distance_sq = np.maximum(scaled_distance_sq, np.zeros_like(scaled_distance_sq))
     scaled_distance = np.sqrt(scaled_distance_sq)
-    scaled_distance = np.maximum(scaled_distance, 0.0)
+    scaled_distance = np.maximum(scaled_distance, np.zeros_like(scaled_distance))
     return np.exp(-scaled_distance)
 
 
@@ -200,14 +210,15 @@ def _exponential_kernel_per_class(
     bandwidth: np.ndarray,
     normalized: bool = False,
 ) -> np.ndarray:
-    bandw_inv = 1.0 / bandwidth
+    bandw_inv = np.reciprocal(bandwidth)
     bandw_inv_sq = np.square(bandw_inv)
     x_norm_sq = np.square(X).sum(axis=1).reshape((X.shape[0], 1))
     w_norm_sq = np.square(W).sum(axis=1)
-    scaled_distance_sq = (x_norm_sq + w_norm_sq - 2.0 * np.dot(X, W.T)) * bandw_inv_sq
-    scaled_distance_sq = np.maximum(scaled_distance_sq, 0.0)
+    cross_term = np.dot(X, W.T)
+    scaled_distance_sq = (x_norm_sq + w_norm_sq - (cross_term + cross_term)) * bandw_inv_sq
+    scaled_distance_sq = np.maximum(scaled_distance_sq, np.zeros_like(scaled_distance_sq))
     scaled_distance = np.sqrt(scaled_distance_sq)
-    scaled_distance = np.maximum(scaled_distance, 0.0)
+    scaled_distance = np.maximum(scaled_distance, np.zeros_like(scaled_distance))
     return np.exp(-scaled_distance)
 
 
@@ -218,14 +229,15 @@ def _exponential_kernel_per_class_per_feature(
     bandwidth: np.ndarray,
     normalized: bool = False,
 ) -> np.ndarray:
-    bandw_inv = 1.0 / bandwidth
+    bandw_inv = np.reciprocal(bandwidth)
     bandw_inv_sq = np.square(bandw_inv)
     x_norm_sq = np.dot(np.square(X), bandw_inv_sq.T)
     w_norm_sq = (np.square(W) * bandw_inv_sq).sum(axis=1)
-    scaled_distance_sq = x_norm_sq + w_norm_sq - 2.0 * np.dot(X, (W * bandw_inv_sq).T)
-    scaled_distance_sq = np.maximum(scaled_distance_sq, 0.0)
+    cross_term = np.dot(X, (W * bandw_inv_sq).T)
+    scaled_distance_sq = x_norm_sq + w_norm_sq - (cross_term + cross_term)
+    scaled_distance_sq = np.maximum(scaled_distance_sq, np.zeros_like(scaled_distance_sq))
     scaled_distance = np.sqrt(scaled_distance_sq)
-    scaled_distance = np.maximum(scaled_distance, 0.0)
+    scaled_distance = np.maximum(scaled_distance, np.zeros_like(scaled_distance))
     return np.exp(-scaled_distance)
 # ------------------------------------------------------------------------------
 
