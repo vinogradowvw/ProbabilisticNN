@@ -1,6 +1,6 @@
 import numpy as np
 
-from numba_backend.kernels import resolve_kernel
+from probabilisticnn.numba_backend.kernels import resolve_kernel
 
 def pnn_jit_inference(
     kernel: str,

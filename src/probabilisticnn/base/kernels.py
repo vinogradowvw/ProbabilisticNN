@@ -1,5 +1,5 @@
 import numpy as np
-from base.types import KernelCallable
+from probabilisticnn.base.types import KernelCallable
 
 
 # ------------------------------------------------------------------------------
@@ -146,32 +146,20 @@ def exponential_kernel(
 
     # bandwidth по каждому признаку
     elif bandwidth_sharing == "per_feature":
-        x_scaled = X / bandwidth
-        w_scaled = W / bandwidth
-        x_norm_sq = (np.square(x_scaled)).sum(axis=1, keepdims=True)
-        w_norm_sq = (np.square(w_scaled)).sum(axis=1)
-        scaled_distance_sq = x_norm_sq + w_norm_sq - 2.0 * np.dot(x_scaled, (w_scaled).T)
-        scaled_distance = np.sqrt(np.clip(scaled_distance_sq, 0, None))
+        scaled_diff = X[:, None, :] / bandwidth - W[None, :, :] / bandwidth
+        scaled_distance = np.sqrt(np.square(scaled_diff).sum(axis=2))
         return _exp_from_scaled_distance(scaled_distance)
 
     # bandwidth по каждому классу
     elif bandwidth_sharing == "per_class":
-        bandw_inv = 1.0 / bandwidth
-        bandw_inv_sq = np.square(bandw_inv)
-        x_norm_sq = np.square(X).sum(axis=1, keepdims=True)
-        w_norm_sq = np.square(W).sum(axis=1)
-        scaled_distance_sq = (x_norm_sq + w_norm_sq - 2.0 * np.dot(X, W.T)) * bandw_inv_sq
-        scaled_distance = np.sqrt(np.clip(scaled_distance_sq, 0, None))
+        scaled_diff = (X[:, None, :] - W[None, :, :]) / bandwidth[None, :, None]
+        scaled_distance = np.sqrt(np.square(scaled_diff).sum(axis=2))
         return _exp_from_scaled_distance(scaled_distance)
 
     # bandwidth по каждому классу по каждому признаку
     elif bandwidth_sharing == "per_class_per_feature":
-        bandw_inv = 1.0 / bandwidth
-        bandw_inv_sq = np.square(bandw_inv)
-        x_norm_sq = np.dot(np.square(X), bandw_inv_sq.T)
-        w_norm_sq = (np.square(W) * bandw_inv_sq).sum(axis=1)
-        scaled_distance_sq = x_norm_sq + w_norm_sq - 2.0 * np.dot(X, (W * bandw_inv_sq).T)
-        scaled_distance = np.sqrt(np.clip(scaled_distance_sq, 0, None))
+        scaled_diff = (X[:, None, :] - W[None, :, :]) / bandwidth[None, :, :]
+        scaled_distance = np.sqrt(np.square(scaled_diff).sum(axis=2))
         return _exp_from_scaled_distance(scaled_distance)
     else:
         raise ValueError(f"Unknown bandwidth_sharing={bandwidth_sharing!r}.")

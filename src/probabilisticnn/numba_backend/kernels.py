@@ -1,5 +1,5 @@
 import numpy as np
-from base.types import KernelCallable
+from probabilisticnn.base.types import KernelCallable
 from numba import njit
 
 

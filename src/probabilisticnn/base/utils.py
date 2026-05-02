@@ -72,7 +72,7 @@ def validate_backend(backend):
         raise ValueError(f"Unknown backend={backend!r}. Available: 'numpy', 'numba'.")
     if backend == "numba":
         try:
-            from numba_backend import pnn_jit_inference, grnn_jit_inference
+            from probabilisticnn.numba_backend import pnn_jit_inference, grnn_jit_inference
         except ImportError as exc:
             raise ImportError(
                 "Numba backend is not available. Install it with "

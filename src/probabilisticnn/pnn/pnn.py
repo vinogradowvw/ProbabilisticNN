@@ -2,12 +2,12 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils.validation import validate_data, check_is_fitted
 from sklearn.utils.multiclass import unique_labels
 
-from common.pattern_layer import PatternLayer, AdaptivePatternLayer
-from pnn.layers import OutputLayer, SummationLayer
-from base.optim import BandwidthOptimizer
-from base.utils import normalize_l2
-from base.utils import cast_to_dtype
-from base.utils import validate_backend
+from probabilisticnn.common.pattern_layer import PatternLayer, AdaptivePatternLayer
+from probabilisticnn.pnn.layers import OutputLayer, SummationLayer
+from probabilisticnn.base.optim import BandwidthOptimizer
+from probabilisticnn.base.utils import normalize_l2
+from probabilisticnn.base.utils import cast_to_dtype
+from probabilisticnn.base.utils import validate_backend
 
 
 class PNN(ClassifierMixin, BaseEstimator):
@@ -72,7 +72,7 @@ class PNN(ClassifierMixin, BaseEstimator):
         X = cast_to_dtype(X, self.compute_dtype)
 
         if self.backend == "numba":
-                from numba_backend import pnn_jit_inference
+                from probabilisticnn.numba_backend import pnn_jit_inference
 
                 X_transformed = normalize_l2(X) if self.normalize else X
                 y_pred_encoded = pnn_jit_inference(
@@ -261,7 +261,7 @@ class AdaptivePNN(PNN):
         X = cast_to_dtype(X, self.compute_dtype)
 
         if self.backend == "numba":
-            from numba_backend import pnn_jit_inference
+            from probabilisticnn.numba_backend import pnn_jit_inference
 
             X_transformed = normalize_l2(X) if self.normalize else X
             bandwidth = self.pattern_layer_._prepare_bandwidth(self.pattern_layer_.bandwidth_)

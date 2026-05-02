@@ -1,4 +1,4 @@
-from base.utils import cast_to_dtype
+from probabilisticnn.base.utils import cast_to_dtype
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import validate_data, check_is_fitted

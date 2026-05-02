@@ -105,8 +105,8 @@ def _resolve_loss(loss: str, model):
 
     Преобразует строковое имя loss-функции в вызываемую функцию.
     """
-    from pnn.pnn import PNN
-    from grnn.grnn import GRNN
+    from probabilisticnn.pnn.pnn import PNN
+    from probabilisticnn.grnn.grnn import GRNN
 
     if isinstance(model, PNN):
         try:

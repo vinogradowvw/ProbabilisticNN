@@ -1,9 +1,9 @@
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted, validate_data
 import numpy as np
-from base.utils import normalize_l2
-from base.utils import cast_to_dtype
-from base.utils import as_bandwidth_array
+from probabilisticnn.base.utils import normalize_l2
+from probabilisticnn.base.utils import cast_to_dtype
+from probabilisticnn.base.utils import as_bandwidth_array
 
 
 class PatternLayer(TransformerMixin, BaseEstimator):
@@ -29,7 +29,7 @@ class PatternLayer(TransformerMixin, BaseEstimator):
         self.backend = backend
 
     def fit(self, X, y=None):
-        from base.kernels import resolve_kernel
+        from probabilisticnn.base.kernels import resolve_kernel
         self.kernel_ = resolve_kernel(self.kernel)
 
         self.bandwidth_ = as_bandwidth_array(self.bandwidth)
@@ -83,7 +83,7 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
     def fit(self, X, y=None):
         X = validate_data(self, X)
 
-        from base.kernels import resolve_kernel
+        from probabilisticnn.base.kernels import resolve_kernel
         self.kernel_ = resolve_kernel(self.kernel)
 
         if self.normalize:

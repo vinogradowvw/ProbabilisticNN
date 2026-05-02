@@ -3,8 +3,8 @@ import warnings
 import numpy as np
 from scipy.optimize import minimize
 
-from base.loss import _resolve_loss
-from base.utils import cast_to_dtype
+from probabilisticnn.base.utils import cast_to_dtype
+from probabilisticnn.base.loss import _resolve_loss
 
 
 SOLVER_REGISTRY = {
@@ -48,7 +48,7 @@ class BandwidthOptimizer:
 
     def _is_pnn_model(self):
         if not hasattr(self, "is_pnn_model"):
-            from pnn.pnn import PNN
+            from probabilisticnn.pnn.pnn import PNN
             self.is_pnn_model = isinstance(self.model, PNN)
         return self.is_pnn_model
 

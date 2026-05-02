@@ -1,12 +1,12 @@
-from base.optim import BandwidthOptimizer
-from common import AdaptivePatternLayer
+from probabilisticnn.base.optim import BandwidthOptimizer
+from probabilisticnn.common import AdaptivePatternLayer
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.utils.validation import check_is_fitted, validate_data
-from common.pattern_layer import PatternLayer
-from grnn.layers import SummationLayer
-from base.utils import normalize_l2
-from base.utils import cast_to_dtype
-from base.utils import validate_backend
+from probabilisticnn.common.pattern_layer import PatternLayer
+from probabilisticnn.grnn.layers import SummationLayer
+from probabilisticnn.base.utils import normalize_l2
+from probabilisticnn.base.utils import cast_to_dtype
+from probabilisticnn.base.utils import validate_backend
 
 
 class GRNN(BaseEstimator, RegressorMixin):
@@ -48,7 +48,7 @@ class GRNN(BaseEstimator, RegressorMixin):
         X = cast_to_dtype(X, self.compute_dtype)
 
         if self.backend == "numba":
-            from numba_backend import grnn_jit_inference
+            from probabilisticnn.numba_backend import grnn_jit_inference
 
             X_transformed = normalize_l2(X) if self.pattern_layer_.normalize else X
             out = grnn_jit_inference(
@@ -120,7 +120,7 @@ class AdaptiveGRNN(GRNN):
         X = cast_to_dtype(X, self.compute_dtype)
 
         if self.backend == "numba":
-            from numba_backend import grnn_jit_inference
+            from probabilisticnn.numba_backend import grnn_jit_inference
             X_transformed = normalize_l2(X) if self.pattern_layer_.normalize else X
             bandwidth = self.pattern_layer_._prepare_bandwidth(self.pattern_layer_.bandwidth_)
             out = grnn_jit_inference(
