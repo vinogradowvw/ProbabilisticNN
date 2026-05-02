@@ -50,12 +50,14 @@ class OutputLayer:
         self.n_classes_ = len(self.classes_)
         self.prior_ = cast_to_dtype(counts / counts.sum(), self.compute_dtype)
 
-        if self.losses == "uniform":
+        if isinstance(self.losses, str) and self.losses == "uniform":
             losses = cast_to_dtype(np.ones(self.n_classes_), self.compute_dtype)
-        else:
+        elif isinstance(self.losses, np.ndarray) or isinstance(self.losses, list):
             losses = cast_to_dtype(self.losses, self.compute_dtype)
-            if losses.shape != (self.n_classes_,):
+            if losses.shape[0] != self.n_classes_ or losses.ndim != 1:
                 raise ValueError("`losses` must have one value per class.")
+        else:
+            raise ValueError(f"Unknown losses={self.losses!r}.")
 
         self.likelihood_multiplier_ = self.prior_ * losses
         return self
