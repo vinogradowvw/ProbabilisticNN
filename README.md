@@ -1,67 +1,311 @@
 # ProbabilisticNN
 
-- `PNN` — классическая Probabilistic Neural Network для классификации.
-- `AdaptivePNN` — версия PNN, где ширина ядра подбирается оптимизацией.
-- `GRNN` — General Regression Neural Network для задач регрессии.
-- `examples/basic_usage.ipynb` — ноутбук с примерами использования и сравнением обычного PNN с AdaptivePNN.
-- `tests/` — smoke-тесты, которые проверяют, что основные части проекта не сломались.
+`ProbabilisticNN` — Python-библиотека для Probabilistic Neural Networks и General Regression Neural Networks со sklearn-подобным интерфейсом.
 
-## Структура проекта
+На текущем этапе библиотека опубликована на TestPyPI и поддерживает:
 
-```text
-src/
-  base/
-    kernels.py        # gaussian kernel и torch/numpy версии
-    optim.py          # оптимизация bandwidth для AdaptivePNN
-    utils.py          # общие утилиты, например L2-нормализация
-    types.py          # типы для callable kernel
+- `PNN` для классификации;
+- `AdaptivePNN` с подбором параметров ширины ядра;
+- `GRNN` для регрессии;
+- `AdaptiveGRNN` с оптимизацией ширины ядра;
+- выполнение на обычной реализации `numpy`;
+- ускоренный вывод результата через `numba`.
 
-  common/
-    pattern_layer.py  # общий pattern layer для PNN/GRNN и adaptive-вариант
+## Основные возможности
 
-  pnn/
-    pnn.py            # PNN и AdaptivePNN как sklearn-like estimators
-    layers.py         # summation layer и output layer для классификации
+- sklearn-подобный интерфейс: `fit`, `predict`, `predict_proba`;
+- несколько ядерных функций:
+  - `gaussian`;
+  - `laplacian`;
+  - `exponential`;
+- несколько схем параметризации ширины ядра для `AdaptivePNN`:
+  - `per_feature`;
+  - `per_class`;
+  - `per_class_per_feature`;
+- ускоренный backend `numba` для вычислительно тяжелой части вывода результата;
+- тестирование через `pytest` и `tox`.
 
-  grnn/
-    grnn.py           # GRNN estimator
-    summation_layer.py # слой агрегации для регрессии
+## Требования
 
-examples/
-  basic_usage.ipynb   # основной пример запуска
+- Python `3.12+`
+- `numpy`
+- `scipy`
+- `scikit-learn`
 
-tests/
-  test_pnn_smoke.py   # базовые тесты для PNN/AdaptivePNN
-  test_grnn_smoke.py  # базовые тесты для GRNN
+Для ускоренного backend дополнительно нужна `numba`.
+
+## Установка
+
+### Установка из TestPyPI
+
+Для обычного использования без `numba`:
+
+```bash
+python -m pip install \
+  --index-url https://test.pypi.org/simple/ \
+  --extra-index-url https://pypi.org/simple/ \
+  "ProbabilisticNN"
 ```
 
-Разделение сделано так, чтобы не смешивать математику, слои и готовые модели:
+Для установки с `numba` backend:
 
-- `base` содержит оптимизацию параметров и ядровые функции, которые могут использовать разные модели.
-- `common` содержит общий pattern layer, потому что PNN и GRNN оба работают через одинаковые pattern layer.
-- `pnn` содержит только классификационную часть.
-- `grnn` содержит только регрессионную часть.
-- `examples` нужен для запуска и визуальной проверки.
+```bash
+python -m pip install \
+  --index-url https://test.pypi.org/simple/ \
+  --extra-index-url https://pypi.org/simple/ \
+  "ProbabilisticNN[numba]"
+```
 
-## Коротко про PNN
+Для разработки и тестирования:
 
-PNN хранит обучающие объекты как паттерны. Для нового объекта считается похожесть до всех обучающих объектов через Gaussian kernel. Потом ответы суммируются по классам, и выбирается класс с максимальной апостериорной оценкой.
+```bash
+python -m pip install \
+  --index-url https://test.pypi.org/simple/ \
+  --extra-index-url https://pypi.org/simple/ \
+  "ProbabilisticNN[dev]"
+```
 
-Главный параметр обычного PNN — `bandwidth`. Он отвечает за степень сглаживания:
+### Локальная установка из репозитория
 
-- маленький `bandwidth` делает модель более локальной;
-- большой `bandwidth` делает модель более гладкой.
+```bash
+python -m pip install -e ".[dev]"
+```
 
-## Коротко про AdaptivePNN
+## Быстрый старт
 
-В AdaptivePNN ширина ядра не задается одной константой, а подбирается оптимизацией.
-
-Основной вариант в проекте:
+### Классификация с `PNN`
 
 ```python
-AdaptivePNN(bandwidth_sharing="per_feature")
+import numpy as np
+
+from probabilisticnn.pnn import PNN
+
+X_train = np.array([
+    [0.0, 0.0],
+    [0.0, 0.2],
+    [1.0, 1.0],
+    [1.0, 1.2],
+])
+y_train = np.array(["class_a", "class_a", "class_b", "class_b"])
+
+X_test = np.array([
+    [0.0, 0.1],
+    [1.0, 1.1],
+])
+
+model = PNN(
+    bandwidth=0.25,
+    kernel="gaussian",
+    normalize=False,
+)
+
+model.fit(X_train, y_train)
+
+labels = model.predict(X_test)
+proba = model.predict_proba(X_test)
+
+print(labels)
+print(proba)
 ```
 
-Это значит, что у каждого признака есть своя ширина. Такой вариант ближе к подходу Specht: разные признаки могут иметь разную полезность и разную форму распределения.
+### Классификация с `AdaptivePNN`
 
-Также есть варианты с подходами по разделению ширины на классы, и на классы и признаки одновременно.
+```python
+import numpy as np
+
+from probabilisticnn.pnn import AdaptivePNN
+
+X_train = np.array([
+    [0.0, 0.0],
+    [0.0, 0.2],
+    [1.0, 1.0],
+    [1.0, 1.2],
+])
+y_train = np.array([0, 0, 1, 1])
+
+model = AdaptivePNN(
+    kernel="gaussian",
+    bandwidth_sharing="per_feature",
+    loss="correct_class_probability",
+    solver="auto",
+    normalize=False,
+)
+
+model.fit(X_train, y_train)
+
+print(model.predict(X_train))
+print(model.predict_proba(X_train))
+print(model.bandwidth_)
+```
+
+### Регрессия с `GRNN`
+
+```python
+import numpy as np
+
+from probabilisticnn.grnn import GRNN
+
+X_train = np.array([
+    [0.0, 0.0],
+    [0.0, 0.2],
+    [1.0, 1.0],
+    [1.0, 1.2],
+])
+y_train = np.array([1.0, 1.1, 3.0, 3.1])
+
+X_test = np.array([
+    [0.0, 0.1],
+    [1.0, 1.1],
+])
+
+model = GRNN(
+    bandwidth=0.5,
+    kernel="gaussian",
+    normalize=False,
+)
+
+model.fit(X_train, y_train)
+pred = model.predict(X_test)
+
+print(pred)
+```
+
+### Регрессия с `AdaptiveGRNN`
+
+```python
+import numpy as np
+
+from probabilisticnn.grnn import AdaptiveGRNN
+
+X_train = np.array([
+    [0.0, 0.0],
+    [0.0, 0.2],
+    [1.0, 1.0],
+    [1.0, 1.2],
+])
+y_train = np.array([1.0, 1.1, 3.0, 3.1])
+
+model = AdaptiveGRNN(
+    kernel="gaussian",
+    loss="mse",
+    solver="auto",
+    normalize=False,
+)
+
+model.fit(X_train, y_train)
+
+print(model.predict(X_train))
+print(model.bandwidth_)
+```
+
+## Ускорение через `numba`
+
+Для `PNN`, `AdaptivePNN`, `GRNN` и `AdaptiveGRNN` можно выбрать:
+
+- `backend="numpy"` — основной вариант;
+- `backend="numba"` — ускоренный вариант.
+
+Пример:
+
+```python
+from probabilisticnn.pnn import PNN
+
+model = PNN(
+    bandwidth=0.25,
+    kernel="gaussian",
+    backend="numba",
+    normalize=False,
+)
+```
+
+Важно:
+
+- первый вызов `predict` для `numba`-ветки может быть медленнее из-за JIT-компиляции;
+- основной выигрыш по скорости достигается на этапе вычисления значений ядерных функций;
+- если `numba` не установлена, backend `numba` будет недоступен.
+
+## Публичный интерфейс
+
+Импортировать модели следует так:
+
+```python
+from probabilisticnn.pnn import PNN, AdaptivePNN
+from probabilisticnn.grnn import GRNN, AdaptiveGRNN
+```
+
+## Параметры моделей
+
+### `PNN`
+
+Основные параметры:
+
+- `bandwidth` — фиксированная ширина ядра;
+- `kernel` — тип ядра;
+- `losses` — схема весов классов (ошибка неправильной классификации классов);
+- `normalize` — использовать ли L2-нормализацию входов;
+- `backend` — `numpy` или `numba`;
+- `compute_dtype` — `auto`, `float32`, `float64`.
+
+### `AdaptivePNN`
+
+Дополнительно поддерживает:
+
+- `loss` — целевая функция оптимизации;
+- `bandwidth_sharing` — способ задания параметров ширины;
+- `max_iter` — максимальное число шагов оптимизации;
+- `solver` — метод оптимизации;
+- `solver_options` — дополнительные параметры оптимизатора.
+
+### `GRNN`
+
+Основные параметры:
+
+- `bandwidth`;
+- `kernel`;
+- `backend`;
+- `compute_dtype`;
+- `normalize`.
+
+### `AdaptiveGRNN`
+
+Дополнительно поддерживает:
+
+- `loss` — функция ошибки для регрессии;
+- `max_iter`;
+- `solver`;
+- `solver_options`;
+- `normalize`.
+
+`AdaptiveGRNN` оптимизирует ширину ядра по схеме `per_feature`.
+
+## Тестирование
+
+Предпочтительный способ запуска тестов:
+
+```bash
+tox
+```
+
+Или запуск конкретного файла тестов:
+
+```bash
+pytest tests/test_pnn.py
+```
+
+Так как тесты импортируют установленный пакет, удобнее всего запускать их в подготовленном окружении после установки зависимостей.
+
+## Производительность
+
+В репозитории есть отдельные материалы для измерения производительности:
+
+- [benchmarks/inference_bemchmarks.py](benchmarks/inference_bemchmarks.py)
+- [benchmarks/benchmarking.ipynb](benchmarks/benchmarking.ipynb)
+
+## Примеры
+
+Дополнительный пример использования находится в:
+
+- [examples/basic_usage.ipynb](examples/basic_usage.ipynb)
+
+## Лицензия
+Проект распространяется по лицензии MIT. См. файл [LICENCE](LICENCE).
