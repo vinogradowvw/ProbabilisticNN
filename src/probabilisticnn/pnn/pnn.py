@@ -28,7 +28,6 @@ class PNN(ClassifierMixin, BaseEstimator):
         backend="numpy",
         compute_dtype="auto",
     ):
-        validate_backend(backend)
         self.bandwidth = bandwidth
         self.kernel = kernel
         self.losses = losses
@@ -41,13 +40,14 @@ class PNN(ClassifierMixin, BaseEstimator):
 
         Сохраняет обучающие паттерны и обучает все слои PNN.
         """
+        validate_backend(self.backend)
         X, y = validate_data(self, X, y)
         X = cast_to_dtype(X, self.compute_dtype)
-        self.bandwidth = cast_to_dtype(self.bandwidth, self.compute_dtype)
+        self.bandwidth_ = cast_to_dtype(self.bandwidth, self.compute_dtype)
         self.classes_ = unique_labels(y)
         self.y_ = y
         self.pattern_layer_ = PatternLayer(
-            bandwidth=self.bandwidth,
+            bandwidth=self.bandwidth_,
             kernel=self.kernel,
             normalize=self.normalize,
             backend=self.backend
@@ -151,7 +151,6 @@ class AdaptivePNN(PNN):
         self.loss = loss
         self.bandwidth_sharing = bandwidth_sharing
         self.max_iter = max_iter
-        self.eval_mode = False
         self.normalize = normalize
         self.solver = solver
         self.solver_options = solver_options
@@ -167,6 +166,7 @@ class AdaptivePNN(PNN):
 
         Обучает слои AdaptivePNN и оптимизирует параметры ширины.
         """
+        validate_backend(self.backend)
         X, y = validate_data(self, X, y)
         X = cast_to_dtype(X, self.compute_dtype)
         self.classes_ = unique_labels(y)
@@ -194,6 +194,8 @@ class AdaptivePNN(PNN):
             solver_options=self.solver_options,
         ).optimize()
         self.bandwidth_ = self.optimizer_.bandwidth_
+        self.n_iter_ = self.optimizer_.n_iter_
+        self.converged_ = self.optimizer_.converged_
 
         return self
 

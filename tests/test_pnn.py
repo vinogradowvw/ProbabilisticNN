@@ -1,5 +1,4 @@
 """Тесты для PNN и AdaptivePNN estimator-ов."""
-
 import numpy as np
 import pytest
 
@@ -7,10 +6,15 @@ import probabilisticnn.pnn.pnn as pnn_module
 from probabilisticnn.pnn.pnn import AdaptivePNN
 from probabilisticnn.pnn.pnn import PNN
 from sklearn.exceptions import NotFittedError
+from sklearn.utils.estimator_checks import check_estimator
 
 
 FLOAT_DTYPES = (np.float32, np.float64)
 
+KERNELS = {"gaussian", "laplacian", "exponential"}
+LOSSES = {"correct_class_probability", "bce", "cross_entropy"}
+SOLVERS = {"auto", "lbfgs", "slsqp", "nelder_mead", "powell"}
+BACKENDS = {"numpy", "numba"}
 
 def _compute_dtype_name(dtype) -> str:
     """Возвращает имя dtype в формате строкового API библиотеки."""
@@ -46,7 +50,8 @@ class DummyBandwidthOptimizer:
         self.solver_options = solver_options
         self.bandwidth_ = None
         self.converged_ = True
-        self.n_iter_ = 0
+        # sklearn expects estimators with max_iter to expose at least one executed iteration.
+        self.n_iter_ = 1
         DummyBandwidthOptimizer.instances.append(self)
 
     def optimize(self):
@@ -64,6 +69,14 @@ class DummyBandwidthOptimizer:
 
 class TestPNN:
     """Проверка базового PNN estimator-а."""
+
+    @pytest.mark.parametrize("kernel", KERNELS)
+    @pytest.mark.parametrize("backend", BACKENDS)
+    @pytest.mark.parametrize("normalize", [True, False])
+    def test_sklearn_compatibility(self, kernel, backend, normalize):
+        """Проверка совместимости с scikit-learn."""
+        pnn = PNN(kernel=kernel, backend=backend, normalize=normalize)
+        check_estimator(pnn)
 
     def test_predict_returns_expected_string_labels(self):
         """predict должен возвращать исходные label-ы, а не encoded индексы классов."""
@@ -106,6 +119,17 @@ class TestPNN:
 class TestAdaptivePNN:
     """Проверка AdaptivePNN без зависимости от реальной SciPy-оптимизации."""
 
+    @pytest.mark.parametrize("kernel", KERNELS)
+    @pytest.mark.parametrize("backend", BACKENDS)
+    @pytest.mark.parametrize("normalize", [True, False])
+    @pytest.mark.parametrize("loss", LOSSES)
+    @pytest.mark.parametrize("solver", SOLVERS)
+    @pytest.mark.parametrize("bandwidth_sharing", ["per_feature", "per_class", "per_class_per_feature"])
+    def test_adaptive_pnn_sklearn_compatibility(self, kernel, backend, normalize, loss, solver, bandwidth_sharing):
+        """Проверка совместимости с scikit-learn."""
+        pnn = AdaptivePNN(kernel=kernel, backend=backend, normalize=normalize, loss=loss, solver=solver, bandwidth_sharing=bandwidth_sharing)
+        check_estimator(pnn)
+
     @pytest.fixture(autouse=True)
     def _patch_optimizer(self, monkeypatch):
         """Подменяет реальный BandwidthOptimizer управляемым тестовым stub-ом."""
@@ -144,6 +168,8 @@ class TestAdaptivePNN:
         assert model.bandwidth_.shape == expected_shape
         assert model.pattern_layer_.bandwidth_.shape == expected_shape
         assert model.pattern_layer_.converged_ is True
+        assert model.n_iter_ == optimizer.n_iter_
+        assert model.converged_ is optimizer.converged_
         assert model.optimizer_ is optimizer
 
     def test_forward_train_rejects_conflicting_flags(self):

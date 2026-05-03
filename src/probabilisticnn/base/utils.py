@@ -12,7 +12,20 @@ def cast_to_dtype(X: np.ndarray | np.generic | float | int, dtype: str):
     """Cast arrays or scalars to a specified floating dtype."""
 
     if dtype == "auto":
-        return np.asarray(X)
+        arr = np.asarray(X)
+
+        if isinstance(arr, np.ndarray):
+            if arr.dtype == np.float32 or arr.dtype == np.float64:
+                if not arr.flags.c_contiguous:
+                    arr = np.ascontiguousarray(arr)
+                return arr
+
+            arr = np.asarray(arr, dtype=np.float64)
+            if not arr.flags.c_contiguous:
+                arr = np.ascontiguousarray(arr)
+            return arr
+
+        return np.float64(arr)
 
     if dtype == "float64":
         target_dtype = np.float64

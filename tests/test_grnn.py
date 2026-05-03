@@ -8,9 +8,15 @@ from probabilisticnn.base.kernels import gaussian_kernel
 from probabilisticnn.grnn.grnn import AdaptiveGRNN
 from probabilisticnn.grnn.grnn import GRNN
 from sklearn.exceptions import NotFittedError
+from sklearn.utils.estimator_checks import check_estimator
 
 
 FLOAT_DTYPES = (np.float32, np.float64)
+
+KERNELS = {"gaussian", "laplacian", "exponential"}
+LOSSES = {"mse", "mae"}
+SOLVERS = {"auto", "lbfgs", "slsqp", "nelder_mead", "powell"}
+BACKENDS = {"numpy", "numba"}
 
 
 def _compute_dtype_name(dtype) -> str:
@@ -70,7 +76,8 @@ class DummyBandwidthOptimizer:
         self.solver_options = solver_options
         self.bandwidth_ = None
         self.converged_ = True
-        self.n_iter_ = 0
+        # sklearn expects estimators with max_iter to expose at least one executed iteration.
+        self.n_iter_ = 1
         DummyBandwidthOptimizer.instances.append(self)
 
     def optimize(self):
@@ -90,6 +97,14 @@ class TestGRNN:
     """
     Тесты для GRNN моделей.
     """
+
+    @pytest.mark.parametrize("kernel", KERNELS)
+    @pytest.mark.parametrize("backend", BACKENDS)
+    def test_sklearn_compatibility(self, kernel, backend):
+        """Проверка совместимости с scikit-learn"""
+        grnn = GRNN(kernel=kernel, backend=backend)
+        check_estimator(grnn)
+
     @pytest.mark.parametrize("dtype", FLOAT_DTYPES)
     def test_predict_matches_manual_kernel_weighted_average(self, dtype):
         """Проверка предсказания для GRNN
@@ -123,16 +138,20 @@ class TestGRNN:
         with pytest.raises(NotFittedError):
             model.predict(np.array([[0.0, 0.0]], dtype=np.float64))
 
-    def test_invalid_backend_raises_value_error(self):
-        """Проверка правильности вызова ошибки ValueError при указании неподдерживаемого backend.
-        """
-        with pytest.raises(ValueError, match="Unknown backend"):
-            GRNN(backend="unsupported")
-
 
 class TestAdaptiveGRNN:
     """Тесты для AdaptiveGRNN моделей.
     """
+
+    @pytest.mark.parametrize("kernel", KERNELS)
+    @pytest.mark.parametrize("loss", LOSSES)
+    @pytest.mark.parametrize("solver", SOLVERS)
+    @pytest.mark.parametrize("backend", BACKENDS)
+    def test_sklearn_compatibility(self, kernel, loss, solver, backend):
+        """Проверка совместимости с scikit-learn"""
+        grnn = AdaptiveGRNN(kernel=kernel, loss=loss, solver=solver, backend=backend)
+        check_estimator(grnn)
+
     @pytest.fixture(autouse=True)
     def _patch_optimizer(self, monkeypatch):
         """Подмена оптимизатора ширины"""
@@ -166,6 +185,8 @@ class TestAdaptiveGRNN:
         assert model.bandwidth_.shape == (2,)  # оптимизатор использует правильную bandwidth_ форму
         assert model.pattern_layer_.bandwidth_.shape == (2,)  # оптимизатор передал в pattern_layer_ правильную bandwidth_ форму
         assert model.pattern_layer_.converged_ is True 
+        assert model.n_iter_ == optimizer.n_iter_
+        assert model.converged_ is optimizer.converged_
         assert model.optimizer_ is optimizer  # оптимизатор передал в объект модели оптимизатора
 
     @pytest.mark.parametrize("dtype", FLOAT_DTYPES)

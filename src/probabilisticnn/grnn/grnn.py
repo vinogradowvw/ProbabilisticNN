@@ -9,32 +9,33 @@ from probabilisticnn.base.utils import cast_to_dtype
 from probabilisticnn.base.utils import validate_backend
 
 
-class GRNN(BaseEstimator, RegressorMixin):
+class GRNN(RegressorMixin, BaseEstimator):
 
     def __init__(
         self,
         bandwidth=1.0,
         kernel="gaussian",
         backend="numpy",
-        compute_dtype="auto"
+        compute_dtype="auto",
+        normalize=False,
     ) -> None:
-        validate_backend(backend)
-
         self.bandwidth = bandwidth
         self.kernel = kernel
         self.backend = backend
         self.compute_dtype = compute_dtype
+        self.normalize = normalize
 
     def fit(self, X, y):
+        validate_backend(self.backend)
         X, y = validate_data(self, X, y)
         X = cast_to_dtype(X, self.compute_dtype)
         y = cast_to_dtype(y, self.compute_dtype)
-        self.bandwidth = cast_to_dtype(self.bandwidth, self.compute_dtype)
+        self.bandwidth_ = cast_to_dtype(self.bandwidth, self.compute_dtype)
         
         self.pattern_layer_ = PatternLayer(
-            self.bandwidth,
+            self.bandwidth_,
             self.kernel,
-            normalize=False,
+            normalize=self.normalize,
             backend=self.backend,
         ).fit(X)
 
@@ -69,6 +70,8 @@ class GRNN(BaseEstimator, RegressorMixin):
 
 class AdaptiveGRNN(GRNN):
 
+    bandwidth_sharing = "per_feature"
+
     def __init__(
         self, 
         kernel="gaussian",
@@ -80,18 +83,17 @@ class AdaptiveGRNN(GRNN):
         backend="numpy",
         compute_dtype="auto",
     ) -> None:
-        validate_backend(backend)
         self.loss = loss
         self.kernel = kernel
         self.max_iter = max_iter
         self.normalize = normalize
-        self.bandwidth_sharing = "per_feature"
         self.solver = solver
         self.solver_options = solver_options
         self.backend = backend
         self.compute_dtype = compute_dtype
 
     def fit(self, X, y):
+        validate_backend(self.backend)
         X, y = validate_data(self, X, y)
         X = cast_to_dtype(X, self.compute_dtype)
         y = cast_to_dtype(y, self.compute_dtype)
@@ -112,6 +114,8 @@ class AdaptiveGRNN(GRNN):
             solver_options=self.solver_options,
         ).optimize()
         self.bandwidth_ = self.optimizer_.bandwidth_
+        self.n_iter_ = self.optimizer_.n_iter_
+        self.converged_ = self.optimizer_.converged_
         return self
     
     def predict(self, X):
