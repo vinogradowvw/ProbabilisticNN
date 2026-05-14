@@ -66,8 +66,10 @@ python -m pip install \
 ```
 
 ### Локальная установка из репозитория
+Для это нужны setuptools.
 
 ```bash
+python -m build
 python -m pip install -e ".[dev]"
 ```
 
