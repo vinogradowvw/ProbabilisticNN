@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 from probabilisticnn.base.types import KernelCallable
 
@@ -15,6 +17,39 @@ def _exp_from_scaled_distance(scaled_distance):
     scaled_distance = np.asarray(scaled_distance)
     scaled_distance = np.maximum(scaled_distance, scaled_distance.dtype.type(0))
     return np.exp(-scaled_distance)
+
+
+def _gaussian_normalization_constant(bandwidth, n_features: int, bandwidth_sharing: str):
+    dtype = np.asarray(bandwidth).dtype
+    base_constant = dtype.type(np.power(2.0 * math.pi, -0.5 * n_features))
+    if bandwidth_sharing == "per_class":
+        return np.asarray(base_constant * np.power(bandwidth, -n_features), dtype=dtype)
+    if bandwidth_sharing == "per_class_per_feature":
+        return np.asarray(base_constant / np.prod(bandwidth, axis=1), dtype=dtype)
+    raise ValueError(f"Unsupported bandwidth_sharing={bandwidth_sharing!r}.")
+
+
+def _laplacian_normalization_constant(bandwidth, n_features: int, bandwidth_sharing: str):
+    dtype = np.asarray(bandwidth).dtype
+    base_constant = dtype.type(np.power(2.0, -n_features))
+    if bandwidth_sharing == "per_class":
+        return np.asarray(base_constant * np.power(bandwidth, -n_features), dtype=dtype)
+    if bandwidth_sharing == "per_class_per_feature":
+        return np.asarray(base_constant / np.prod(bandwidth, axis=1), dtype=dtype)
+    raise ValueError(f"Unsupported bandwidth_sharing={bandwidth_sharing!r}.")
+
+
+def _exponential_normalization_constant(bandwidth, n_features: int, bandwidth_sharing: str):
+    dtype = np.asarray(bandwidth).dtype
+    base_constant = math.gamma(0.5 * n_features) / (
+        2.0 * np.power(math.pi, 0.5 * n_features) * math.gamma(n_features)
+    )
+    base_constant = dtype.type(base_constant)
+    if bandwidth_sharing == "per_class":
+        return np.asarray(base_constant * np.power(bandwidth, -n_features), dtype=dtype)
+    if bandwidth_sharing == "per_class_per_feature":
+        return np.asarray(base_constant / np.prod(bandwidth, axis=1), dtype=dtype)
+    raise ValueError(f"Unsupported bandwidth_sharing={bandwidth_sharing!r}.")
 # ------------------------------------------------------------------------------
 
 
@@ -63,7 +98,13 @@ def gaussian_kernel(
         x_norm_sq = np.square(X).sum(axis=1, keepdims=True)
         w_norm_sq = np.square(W).sum(axis=1)
         scaled_distance = (x_norm_sq + w_norm_sq - 2.0 * np.dot(X, W.T)) * bandw_inv
-        return _exp_from_scaled_distance(scaled_distance)
+
+        # normalized kernel since the bandwidth is different for each class
+        dtype = np.asarray(bandwidth).dtype
+        n_features = X.shape[1]
+        base_constant = dtype.type(np.power(2.0 * math.pi, -0.5 * n_features))
+        normalization = base_constant * np.power(bandwidth, -n_features)
+        return _exp_from_scaled_distance(scaled_distance) * normalization[None, :]
 
 
     # bandwidth по каждому классу по каждому признаку
@@ -73,7 +114,12 @@ def gaussian_kernel(
         x_norm_sq = np.dot(np.square(X), bandw_inv.T)
         w_norm_sq = (np.square(W) * bandw_inv).sum(axis=1)
         scaled_distance = x_norm_sq + w_norm_sq - 2.0 * np.dot(X, (W * bandw_inv).T)
-        return _exp_from_scaled_distance(scaled_distance)
+
+        dtype = np.asarray(bandwidth).dtype
+        n_features = X.shape[1]
+        base_constant = dtype.type(np.power(2.0 * math.pi, -0.5 * n_features))
+        normalization = base_constant / np.prod(bandwidth, axis=1)
+        return _exp_from_scaled_distance(scaled_distance) * normalization[None, :]
     
     else:
         raise ValueError(f"Unknown bandwidth_sharing={bandwidth_sharing!r}.")
@@ -108,7 +154,8 @@ def laplacian_kernel(
     elif bandwidth_sharing == "per_class":
         l1_norm = np.abs(X[:, None, :] - W[None, :, :]).sum(axis=2)
         scaled_distance = l1_norm / bandwidth  # bandwidth shape (n_patterns,) - broadcasted
-        return _exp_from_scaled_distance(scaled_distance)
+        normalization = _laplacian_normalization_constant(bandwidth, X.shape[1], bandwidth_sharing)
+        return _exp_from_scaled_distance(scaled_distance) * normalization[None, :]
 
     elif bandwidth_sharing == "per_class_per_feature":
         l1_norm_normalized = (
@@ -117,7 +164,8 @@ def laplacian_kernel(
                 / bandwidth  # bandwidth shape (n_patterns, n_features)
             ).sum(axis=2)  # (n_samples, n_patterns)
         )
-        return _exp_from_scaled_distance(l1_norm_normalized)
+        normalization = _laplacian_normalization_constant(bandwidth, X.shape[1], bandwidth_sharing)
+        return _exp_from_scaled_distance(l1_norm_normalized) * normalization[None, :]
     else:
         raise ValueError(f"Unknown bandwidth_sharing={bandwidth_sharing!r}.")
 
@@ -154,13 +202,19 @@ def exponential_kernel(
     elif bandwidth_sharing == "per_class":
         scaled_diff = (X[:, None, :] - W[None, :, :]) / bandwidth[None, :, None]
         scaled_distance = np.sqrt(np.square(scaled_diff).sum(axis=2))
-        return _exp_from_scaled_distance(scaled_distance)
+
+        dtype = np.asarray(bandwidth).dtype
+        n_features = X.shape[1]
+        base_constant = dtype.type(math.gamma(0.5 * n_features) / (2.0 * np.power(np.pi, 0.5 * n_features) * math.gamma(n_features)))
+        normalization = base_constant * np.power(bandwidth, -n_features)
+        return _exp_from_scaled_distance(scaled_distance) * normalization[None, :]
 
     # bandwidth по каждому классу по каждому признаку
     elif bandwidth_sharing == "per_class_per_feature":
         scaled_diff = (X[:, None, :] - W[None, :, :]) / bandwidth[None, :, :]
         scaled_distance = np.sqrt(np.square(scaled_diff).sum(axis=2))
-        return _exp_from_scaled_distance(scaled_distance)
+        normalization = _exponential_normalization_constant(bandwidth, X.shape[1], bandwidth_sharing)
+        return _exp_from_scaled_distance(scaled_distance) * normalization[None, :]
     else:
         raise ValueError(f"Unknown bandwidth_sharing={bandwidth_sharing!r}.")
 

@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import pytest
 
@@ -13,6 +15,28 @@ KERNELS = {
     "exponential": exponential_kernel,
 }
 FLOAT_DTYPES = (np.float32, np.float64)
+
+
+def _normalization_constant(kernel_name: str, bandwidth, sharing: str, n_features: int):
+    if sharing not in {"per_class", "per_class_per_feature"}:
+        return 1.0
+
+    if sharing == "per_class":
+        bandwidth_factor = np.power(bandwidth, -n_features)
+    else:
+        bandwidth_factor = 1.0 / np.prod(bandwidth, axis=1)
+
+    if kernel_name == "gaussian":
+        return np.power(2.0 * np.pi, -0.5 * n_features) * bandwidth_factor
+    if kernel_name == "laplacian":
+        return np.power(2.0, -n_features) * bandwidth_factor
+    if kernel_name == "exponential":
+        return (
+            math.gamma(0.5 * n_features)
+            / (2.0 * np.power(np.pi, 0.5 * n_features) * math.gamma(n_features))
+            * bandwidth_factor
+        )
+    raise ValueError(f"Unsupported kernel for test helper: {kernel_name!r}")
 
 
 def _make_bandwidth(sharing: str, dtype=np.float64):
@@ -40,6 +64,7 @@ def _reference_kernel(kernel_name: str, X, W, bandwidth, sharing: str):
     X = np.asarray(X, dtype=np.float64)
     W = np.asarray(W, dtype=np.float64)
     out = np.empty((X.shape[0], W.shape[0]), dtype=np.float64)
+    n_features = X.shape[1]
 
     for i, x in enumerate(X):
         for j, w in enumerate(W):
@@ -73,7 +98,11 @@ def _reference_kernel(kernel_name: str, X, W, bandwidth, sharing: str):
             else:
                 raise ValueError(f"Unsupported kernel for test helper: {kernel_name!r}")
 
-            out[i, j] = np.exp(-max(float(scaled_distance), 0.0))
+            normalization = 1.0
+            if sharing in {"per_class", "per_class_per_feature"}:
+                normalization = _normalization_constant(kernel_name, bandwidth, sharing, n_features)[j]
+
+            out[i, j] = normalization * np.exp(-max(float(scaled_distance), 0.0))
 
     return out
 
@@ -121,14 +150,18 @@ class TestKernelMathematicalProperties:
             "per_class_per_feature",
         ],
     )
-    def test_identical_vectors_produce_unit_similarity(self, kernel_name, dtype, sharing):
+    def test_identical_vectors_produce_expected_self_similarity(self, kernel_name, dtype, sharing):
         kernel = KERNELS[kernel_name]
         X = np.array([[0.0, 1.0], [1.5, -0.5], [-1.0, 2.0]], dtype=dtype)
         bandwidth = _make_bandwidth(sharing, dtype=dtype)
 
         actual = kernel(X, X, bandwidth, sharing, normalized=False)
 
-        np.testing.assert_allclose(np.diag(actual), np.ones(X.shape[0]), atol=1e-12)
+        expected_diag = np.ones(X.shape[0], dtype=np.float64)
+        if sharing in {"per_class", "per_class_per_feature"}:
+            expected_diag = _normalization_constant(kernel_name, bandwidth, sharing, X.shape[1])
+
+        np.testing.assert_allclose(np.diag(actual), expected_diag, atol=1e-12)
         assert actual.dtype == np.dtype(dtype)
 
     @pytest.mark.parametrize("kernel_name", list(KERNELS))
@@ -172,6 +205,28 @@ class TestKernelMathematicalProperties:
         assert normalized.dtype == np.dtype(dtype)
         assert euclidean.dtype == np.dtype(dtype)
 
+    @pytest.mark.parametrize("kernel_name", ["gaussian", "exponential"])
+    @pytest.mark.parametrize("dtype", FLOAT_DTYPES)
+    @pytest.mark.parametrize("sharing", ["per_class", "per_class_per_feature"])
+    def test_normalized_per_class_variants_match_euclidean_formula_on_unit_vectors(
+        self,
+        kernel_name,
+        dtype,
+        sharing,
+    ):
+        kernel = KERNELS[kernel_name]
+        X = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=dtype)
+        W = np.array([[1.0, 0.0], [1.0, 1.0], [0.0, -1.0]], dtype=dtype)
+        W = W / np.linalg.norm(W, axis=1, keepdims=True)
+        bandwidth = _make_bandwidth(sharing, dtype=dtype)
+
+        normalized = kernel(X, W, bandwidth, sharing, normalized=True)
+        euclidean = kernel(X, W, bandwidth, sharing, normalized=False)
+
+        _assert_close_for_dtype(normalized, euclidean, dtype)
+        assert normalized.dtype == np.dtype(dtype)
+        assert euclidean.dtype == np.dtype(dtype)
+
     @pytest.mark.parametrize("kernel_name", list(KERNELS))
     @pytest.mark.parametrize("dtype", FLOAT_DTYPES)
     def test_per_class_per_feature_uses_its_own_bandwidth_row_for_three_classes(self, kernel_name, dtype):
@@ -200,7 +255,8 @@ class TestKernelMathematicalProperties:
         )
 
         _assert_close_for_dtype(actual, expected, dtype)
-        assert actual[0, 1] > actual[0, 0] > actual[0, 2]
+        assert np.argmax(actual[0]) == np.argmax(expected[0])
+        assert np.argmin(actual[0]) == np.argmin(expected[0])
         assert actual.dtype == np.dtype(dtype)
 
 

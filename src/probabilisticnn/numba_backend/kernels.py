@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 from probabilisticnn.base.types import KernelCallable
 from numba import njit
@@ -6,6 +8,12 @@ from numba import njit
 # ------------------------------------------------------------------------------
 # jitted kernels for each bandwidth_sharing
 # ------------------------------------------------------------------------------
+@njit
+def _rowwise_product(values: np.ndarray) -> np.ndarray:
+    out = np.empty(values.shape[0], dtype=values.dtype)
+    for i in range(values.shape[0]):
+        out[i] = np.prod(values[i])
+    return out
 
 
 # ------------------------------------------------------------------------------
@@ -67,6 +75,8 @@ def _gaussian_kernel_per_class(
     bandwidth: np.ndarray,
     normalized: bool = False,
 ) -> np.ndarray:
+    dtype = X.dtype
+    n_features = X.shape[1]
     bandwidth_sq = np.square(bandwidth)
     bandw_inv = np.reciprocal(bandwidth_sq + bandwidth_sq)
     x_norm_sq = np.square(X).sum(axis=1).reshape((X.shape[0], 1))
@@ -74,7 +84,9 @@ def _gaussian_kernel_per_class(
     cross_term = np.dot(X, W.T)
     scaled_distance = (x_norm_sq + w_norm_sq - (cross_term + cross_term)) * bandw_inv
     scaled_distance = np.maximum(scaled_distance, scaled_distance.dtype.type(0))
-    return np.exp(-scaled_distance)
+    normalization = dtype.type(np.power(2.0 * np.pi, -0.5 * n_features)) * np.power(bandwidth, -n_features)
+    normalization = normalization.astype(dtype)
+    return np.exp(-scaled_distance) * normalization.reshape((1, normalization.shape[0]))
 
 
 @njit
@@ -84,6 +96,8 @@ def _gaussian_kernel_per_class_per_feature(
     bandwidth: np.ndarray,
     normalized: bool = False,
 ) -> np.ndarray:
+    dtype = X.dtype
+    n_features = X.shape[1]
     bandwidth_sq = np.square(bandwidth)
     bandw_inv = np.reciprocal(bandwidth_sq + bandwidth_sq)
     x_norm_sq = np.dot(np.square(X), bandw_inv.T)
@@ -91,7 +105,9 @@ def _gaussian_kernel_per_class_per_feature(
     cross_term = np.dot(X, (W * bandw_inv).T)
     scaled_distance = x_norm_sq + w_norm_sq - (cross_term + cross_term)
     scaled_distance = np.maximum(scaled_distance, scaled_distance.dtype.type(0))
-    return np.exp(-scaled_distance)
+    normalization = dtype.type(np.power(2.0 * np.pi, -0.5 * n_features)) / _rowwise_product(bandwidth)
+    normalization = normalization.astype(dtype)
+    return np.exp(-scaled_distance) * normalization.reshape((1, normalization.shape[0]))
 # ------------------------------------------------------------------------------
 
 
@@ -133,10 +149,14 @@ def _laplacian_kernel_per_class(
     bandwidth: np.ndarray,
     normalized: bool = False,
 ) -> np.ndarray:
+    dtype = X.dtype
+    n_features = X.shape[1]
     l1_norm = np.abs(X[:, None, :] - W[None, :, :]).sum(axis=2)
     scaled_distance = l1_norm / bandwidth
     scaled_distance = np.maximum(scaled_distance, scaled_distance.dtype.type(0))
-    return np.exp(-scaled_distance)
+    normalization = dtype.type(np.power(2.0, -n_features)) * np.power(bandwidth, -n_features)
+    normalization = normalization.astype(dtype)
+    return np.exp(-scaled_distance) * normalization.reshape((1, normalization.shape[0]))
 
 
 @njit
@@ -146,12 +166,16 @@ def _laplacian_kernel_per_class_per_feature(
     bandwidth: np.ndarray,
     normalized: bool = False,
 ) -> np.ndarray:
+    dtype = X.dtype
+    n_features = X.shape[1]
     l1_norm_normalized = (
         np.abs((X[:, None, :] - W[None, :, :]) / bandwidth)
         .sum(axis=2)
     )
     l1_norm_normalized = np.maximum(l1_norm_normalized, l1_norm_normalized.dtype.type(0))
-    return np.exp(-l1_norm_normalized)
+    normalization = dtype.type(np.power(2.0, -n_features)) / _rowwise_product(bandwidth)
+    normalization = normalization.astype(dtype)
+    return np.exp(-l1_norm_normalized) * normalization.reshape((1, normalization.shape[0]))
 # ------------------------------------------------------------------------------
 
 
@@ -214,6 +238,8 @@ def _exponential_kernel_per_class(
     bandwidth: np.ndarray,
     normalized: bool = False,
 ) -> np.ndarray:
+    dtype = X.dtype
+    n_features = X.shape[1]
     bandw_inv = np.reciprocal(bandwidth)
     bandw_inv_sq = np.square(bandw_inv)
     x_norm_sq = np.square(X).sum(axis=1).reshape((X.shape[0], 1))
@@ -223,7 +249,11 @@ def _exponential_kernel_per_class(
     scaled_distance_sq = np.maximum(scaled_distance_sq, scaled_distance_sq.dtype.type(0))
     scaled_distance = np.sqrt(scaled_distance_sq)
     scaled_distance = np.maximum(scaled_distance, scaled_distance.dtype.type(0))
-    return np.exp(-scaled_distance)
+    normalization = dtype.type(
+        math.gamma(0.5 * n_features) / (2.0 * np.power(np.pi, 0.5 * n_features) * math.gamma(n_features))
+    ) * np.power(bandwidth, -n_features)
+    normalization = normalization.astype(dtype)
+    return np.exp(-scaled_distance) * normalization.reshape((1, normalization.shape[0]))
 
 
 @njit
@@ -233,6 +263,8 @@ def _exponential_kernel_per_class_per_feature(
     bandwidth: np.ndarray,
     normalized: bool = False,
 ) -> np.ndarray:
+    dtype = X.dtype
+    n_features = X.shape[1]
     bandw_inv = np.reciprocal(bandwidth)
     bandw_inv_sq = np.square(bandw_inv)
     x_norm_sq = np.dot(np.square(X), bandw_inv_sq.T)
@@ -242,7 +274,11 @@ def _exponential_kernel_per_class_per_feature(
     scaled_distance_sq = np.maximum(scaled_distance_sq, scaled_distance_sq.dtype.type(0))
     scaled_distance = np.sqrt(scaled_distance_sq)
     scaled_distance = np.maximum(scaled_distance, scaled_distance.dtype.type(0))
-    return np.exp(-scaled_distance)
+    normalization = dtype.type(
+        math.gamma(0.5 * n_features) / (2.0 * np.power(np.pi, 0.5 * n_features) * math.gamma(n_features))
+    ) / _rowwise_product(bandwidth)
+    normalization = normalization.astype(dtype)
+    return np.exp(-scaled_distance) * normalization.reshape((1, normalization.shape[0]))
 # ------------------------------------------------------------------------------
 
 

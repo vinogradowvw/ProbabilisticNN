@@ -165,6 +165,24 @@ class TestNumbaKernels:
         _assert_close_for_dtype(actual, expected, dtype)
         assert actual.dtype == np.dtype(dtype)
 
+    @pytest.mark.parametrize("kernel_name", ["gaussian", "exponential"])
+    @pytest.mark.parametrize("dtype", FLOAT_DTYPES)
+    @pytest.mark.parametrize("sharing", ["per_class", "per_class_per_feature"])
+    def test_normalized_per_class_variants_match_numpy_backend(self, kernel_name, dtype, sharing):
+        """normalized-путь для per-class режимов должен совпадать между numba и NumPy."""
+        numpy_kernel = NUMPY_KERNELS[kernel_name]
+        numba_kernel = NUMBA_KERNELS[kernel_name]
+        X = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=dtype)
+        W = np.array([[1.0, 0.0], [1.0, 1.0], [0.0, -1.0]], dtype=dtype)
+        W = W / np.linalg.norm(W, axis=1, keepdims=True)
+        bandwidth = _make_bandwidth(sharing, dtype=dtype)
+
+        expected = numpy_kernel(X, W, bandwidth, sharing, normalized=True)
+        actual = numba_kernel(X, W, bandwidth, sharing, normalized=True)
+
+        _assert_close_for_dtype(actual, expected, dtype)
+        assert actual.dtype == np.dtype(dtype)
+
     @pytest.mark.parametrize("kernel_name", list(NUMBA_KERNELS))
     @pytest.mark.parametrize("sharing", ["scalar", "per_feature", "per_class", "per_class_per_feature"])
     def test_accepts_float32_and_float64_independently_of_call_order(self, kernel_name, sharing):
