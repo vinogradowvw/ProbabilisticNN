@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from probabilisticnn.base.kernels import gaussian_kernel
+from probabilisticnn.base.kernels import GaussianKernel
 from probabilisticnn.base.utils import normalize_l2
 from probabilisticnn.common.pattern_layer import AdaptivePatternLayer
 from probabilisticnn.common.pattern_layer import PatternLayer
@@ -32,7 +32,7 @@ class TestPatternLayer:
         layer = PatternLayer(bandwidth=0.5, kernel="gaussian", normalize=True).fit(X)
 
         np.testing.assert_allclose(layer.patterns_, normalize_l2(X))
-        assert layer.kernel_ is gaussian_kernel
+        assert isinstance(layer.kernel_, GaussianKernel)
         assert layer.bandwidth_ == 0.5
         assert layer.patterns_.dtype == np.dtype(dtype)
 
@@ -58,6 +58,7 @@ class TestPatternLayer:
         ).fit(X_train)
 
         actual = layer.transform(X_test)
+        gaussian_kernel = GaussianKernel()
         expected = gaussian_kernel(
             normalize_l2(X_test),
             normalize_l2(X_train),
@@ -263,6 +264,7 @@ class TestAdaptivePatternLayer:
         layer.converged_ = True
 
         actual = layer.transform(X_test)
+        gaussian_kernel = GaussianKernel()
         expected = gaussian_kernel(
             X_test,
             X_train,

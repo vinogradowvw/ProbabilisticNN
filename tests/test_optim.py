@@ -6,7 +6,13 @@ import numpy as np
 import pytest
 
 import probabilisticnn.base.optim as optim_module
+from probabilisticnn.base.loss import HuberLoss
+from probabilisticnn.base.loss import MSELoss
 from probabilisticnn.base.optim import BandwidthOptimizer
+from probabilisticnn.base.optim import BOUNDED_SOLVERS
+from probabilisticnn.base.optim import DEFAULT_MAX_BANDWIDTH
+from probabilisticnn.base.optim import DEFAULT_MIN_BANDWIDTH
+from probabilisticnn.base.optim import GRADIENT_SOLVERS
 from probabilisticnn.base.optim import INVALID_OBJECTIVE
 from probabilisticnn.base.optim import _resolve_solver
 
@@ -145,6 +151,19 @@ def _make_optimizer(
     return optimizer
 
 
+def _finite_difference_grad(fun, x, eps=1e-6):
+    """Центральная конечная разность для численной проверки градиента."""
+    x = np.asarray(x, dtype=np.float64)
+    grad = np.zeros_like(x)
+
+    for i in range(x.size):
+        step = np.zeros_like(x)
+        step[i] = eps
+        grad[i] = (fun(x + step) - fun(x - step)) / (2.0 * eps)
+
+    return grad
+
+
 class TestBandwidthOptimizerHelpers:
     """Тесты для служебных функций оптимизатора."""
 
@@ -153,14 +172,32 @@ class TestBandwidthOptimizerHelpers:
         [
             ("auto", "L-BFGS-B"),
             ("lbfgs", "L-BFGS-B"),
+            ("l_bfgs_b", "L-BFGS-B"),
+            ("bfgs", "BFGS"),
+            ("cg", "CG"),
+            ("newton_cg", "Newton-CG"),
             ("slsqp", "SLSQP"),
+            ("tnc", "TNC"),
             ("nelder_mead", "Nelder-Mead"),
             ("powell", "Powell"),
+            ("cobyla", "COBYLA"),
+            ("cobyqa", "COBYQA"),
         ],
     )
     def test_resolve_solver_aliases(self, solver, expected):
         """Пользовательские алиасы solver должны разворачиваться в имена SciPy-методов."""
         assert _resolve_solver(solver) == expected
+
+    def test_gradient_solvers_set_contains_only_supported_gradient_methods(self):
+        """Набор gradient solver-ов должен совпадать с методами, где мы передаем jac."""
+        assert GRADIENT_SOLVERS == {
+            "L-BFGS-B",
+            "BFGS",
+            "CG",
+            "Newton-CG",
+            "SLSQP",
+            "TNC",
+        }
 
     def test_resolve_solver_rejects_unknown_name(self):
         """Оптимизатор должен вызывать ошибку при указании неподдерживаемого solver."""
@@ -173,22 +210,22 @@ class TestBandwidthOptimizerHelpers:
             (
                 "per_feature",
                 np.array([0.5, 1.5], dtype=np.float64),
-                np.array([0.5, 1.5], dtype=np.float64),
-                np.array([2.0, 3.0], dtype=np.float64),
+                np.log(np.array([0.5, 1.5], dtype=np.float64)),
+                np.log(np.array([2.0, 3.0], dtype=np.float64)),
                 np.array([2.0, 3.0], dtype=np.float64),
             ),
             (
                 "per_class",
                 np.array([0.5, 1.5, 2.5], dtype=np.float64),
-                np.array([0.5, 1.5, 2.5], dtype=np.float64),
-                np.array([2.0, 3.0, 4.0], dtype=np.float64),
+                np.log(np.array([0.5, 1.5, 2.5], dtype=np.float64)),
+                np.log(np.array([2.0, 3.0, 4.0], dtype=np.float64)),
                 np.array([2.0, 3.0, 4.0], dtype=np.float64),
             ),
             (
                 "per_class_per_feature",
                 np.array([[0.5, 1.5], [2.5, 3.5]], dtype=np.float64),
-                np.array([0.5, 1.5, 2.5, 3.5], dtype=np.float64),
-                np.array([2.0, 3.0, 4.0, 5.0], dtype=np.float64),
+                np.log(np.array([0.5, 1.5, 2.5, 3.5], dtype=np.float64)),
+                np.log(np.array([2.0, 3.0, 4.0, 5.0], dtype=np.float64)),
                 np.array([[2.0, 3.0], [4.0, 5.0]], dtype=np.float64),
             ),
         ],
@@ -216,25 +253,170 @@ class TestBandwidthOptimizerHelpers:
         packed[...] = -1.0
         assert np.all(model.pattern_layer_.bandwidth_params > 0)
 
+
+class TestLossGradients:
+    """Проверка градиентов на уровне loss."""
+
+    def test_mse_loss_grad_matches_finite_differences_for_bandwidth(self):
+        """MSELoss.grad должен совпадать с численным градиентом по bandwidth."""
+        loss = MSELoss()
+        X = np.zeros((3, 2), dtype=np.float64)
+        y = np.array([1.0, -0.5, 2.0], dtype=np.float64)
+
+        class ToyModel:
+            def predict_from_bandwidth(self, bandwidth):
+                bandwidth = np.asarray(bandwidth, dtype=np.float64)
+                b0, b1 = bandwidth
+                return np.array(
+                    [
+                        b0 + 2.0 * b1,
+                        b0 * b1,
+                        np.sin(b0) + b1**2,
+                    ],
+                    dtype=np.float64,
+                )
+
+            def grad(self, X, y, bandwidth=None, loo=False):
+                bandwidth = np.asarray(bandwidth, dtype=np.float64)
+                b0, b1 = bandwidth
+                return np.array(
+                    [
+                        [1.0, 2.0],
+                        [b1, b0],
+                        [np.cos(b0), 2.0 * b1],
+                    ],
+                    dtype=np.float64,
+                )
+
+        model = ToyModel()
+        bandwidth = np.array([1.2, 0.7], dtype=np.float64)
+        y_pred = model.predict_from_bandwidth(bandwidth)
+
+        analytic = loss.grad(X, y, y_pred, model, loo=False, bandwidth=bandwidth)
+        numeric = _finite_difference_grad(
+            lambda b: loss(model.predict_from_bandwidth(b), y),
+            bandwidth,
+        )
+
+        np.testing.assert_allclose(analytic, numeric, rtol=1e-6, atol=1e-7)
+
+    def test_huber_loss_matches_piecewise_definition(self):
+        """HuberLoss должен совпадать с кусочно-заданной формулой."""
+        loss = HuberLoss(delta=1.5)
+        y_true = np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float64)
+        y_pred = np.array([0.5, -1.0, 2.0, -3.0], dtype=np.float64)
+
+        actual = loss(y_pred, y_true)
+        expected = np.mean(
+            [
+                0.5 * 0.5**2,
+                0.5 * 1.0**2,
+                1.5 * (2.0 - 0.75),
+                1.5 * (3.0 - 0.75),
+            ]
+        )
+
+        assert actual == pytest.approx(expected)
+
+    def test_huber_loss_grad_matches_finite_differences_for_bandwidth(self):
+        """HuberLoss.grad должен совпадать с численным градиентом по bandwidth."""
+        loss = HuberLoss(delta=0.75)
+        X = np.zeros((3, 2), dtype=np.float64)
+        y = np.array([1.0, -0.5, 2.0], dtype=np.float64)
+
+        class ToyModel:
+            def predict_from_bandwidth(self, bandwidth):
+                bandwidth = np.asarray(bandwidth, dtype=np.float64)
+                b0, b1 = bandwidth
+                return np.array(
+                    [
+                        b0 + 2.0 * b1,
+                        b0 * b1,
+                        np.sin(b0) + b1**2,
+                    ],
+                    dtype=np.float64,
+                )
+
+            def grad(self, X, y, bandwidth=None, loo=False):
+                bandwidth = np.asarray(bandwidth, dtype=np.float64)
+                b0, b1 = bandwidth
+                return np.array(
+                    [
+                        [1.0, 2.0],
+                        [b1, b0],
+                        [np.cos(b0), 2.0 * b1],
+                    ],
+                    dtype=np.float64,
+                )
+
+        model = ToyModel()
+        bandwidth = np.array([1.2, 0.7], dtype=np.float64)
+        y_pred = model.predict_from_bandwidth(bandwidth)
+
+        analytic = loss.grad(X, y, y_pred, model, loo=False, bandwidth=bandwidth)
+        numeric = _finite_difference_grad(
+            lambda b: loss(model.predict_from_bandwidth(b), y),
+            bandwidth,
+        )
+
+        np.testing.assert_allclose(analytic, numeric, rtol=1e-6, atol=1e-7)
+
+    def test_pack_clips_to_safe_bandwidth_limits_and_objective_rejects_unsafe_theta(self, monkeypatch):
+        """pack стабилизирует старт, а objective отклоняет theta вне безопасных bounds."""
+        pattern_layer = _make_pattern_layer(
+            "per_feature",
+            np.array([1e-20, 1e20], dtype=np.float64),
+        )
+        model = DummyGRNNModel(pattern_layer)
+        optimizer = _make_optimizer(monkeypatch, model, lambda y_pred, y_true: 0.0, is_pnn_model=False)
+
+        packed = optimizer._pack_bandwidth()
+        theta = np.array([-1e6, 1e6], dtype=np.float64)
+
+        np.testing.assert_allclose(
+            packed,
+            np.log(np.array([DEFAULT_MIN_BANDWIDTH, DEFAULT_MAX_BANDWIDTH], dtype=np.float64)),
+            rtol=1e-10,
+            atol=1e-12,
+        )
+        assert optimizer._theta_is_safe(theta) is False
+        assert optimizer._objective(theta) == INVALID_OBJECTIVE
+
 class TestBandwidthOptimizerObjective:
     """Проверка целевой функции оптимизатора."""
     @pytest.mark.parametrize(
         "theta",
         [
-            np.array([0.0, 1.0], dtype=np.float64),
-            np.array([-1.0, 1.0], dtype=np.float64),
             np.array([np.nan, 1.0], dtype=np.float64),
             np.array([np.inf, 1.0], dtype=np.float64),
         ],
     )
-    def test_objective_returns_invalid_for_non_positive_or_non_finite_bandwidth(self, monkeypatch, theta):
-        """Невалидная ширина должна отбрасываться до вызова model._forward_train."""
+    def test_objective_returns_invalid_for_non_finite_theta(self, monkeypatch, theta):
+        """Нечисловой theta должен отбрасываться до вызова model._forward_train."""
         pattern_layer = _make_pattern_layer("per_feature", np.array([0.5, 1.5], dtype=np.float64))
         model = DummyGRNNModel(pattern_layer)
         optimizer = _make_optimizer(monkeypatch, model, lambda y_pred, y_true: 0.0, is_pnn_model=False)
 
         assert optimizer._objective(theta) == INVALID_OBJECTIVE
         assert model.forward_calls == []
+
+    def test_objective_uses_positive_bandwidth_unpacked_from_log_theta(self, monkeypatch):
+        """В objective theta интерпретируется как log(bandwidth), а не как bandwidth напрямую."""
+        pattern_layer = _make_pattern_layer("per_feature", np.array([0.5, 1.5], dtype=np.float64))
+        model = DummyGRNNModel(pattern_layer)
+        optimizer = _make_optimizer(monkeypatch, model, lambda y_pred, y_true: 0.0, is_pnn_model=False)
+
+        theta = np.array([0.0, -1.0], dtype=np.float64)
+
+        actual = optimizer._objective(theta)
+
+        assert actual == pytest.approx(0.0)
+        np.testing.assert_allclose(
+            model.forward_calls[0],
+            np.exp(theta),
+            rtol=1e-10,
+            atol=1e-12,
+        )
 
     def test_objective_uses_pnn_targets_predictions_scores_and_posteriors(self, monkeypatch):
         """В PNN-ветке objective должен передать в loss все классификационные артефакты."""
@@ -285,7 +467,7 @@ class TestBandwidthOptimizerObjective:
         actual = optimizer._objective(theta)
 
         assert actual == pytest.approx(0.375)
-        np.testing.assert_allclose(model.forward_calls[0], theta, rtol=1e-10, atol=1e-12)
+        np.testing.assert_allclose(model.forward_calls[0], np.exp(theta), rtol=1e-10, atol=1e-12)
         np.testing.assert_allclose(captured["y_pred"], model._y_pred, rtol=1e-10, atol=1e-12)
         np.testing.assert_allclose(captured["y_true"], model.summation_layer_.y_, rtol=1e-10, atol=1e-12)
 
@@ -302,6 +484,53 @@ class TestBandwidthOptimizerObjective:
 
 class TestBandwidthOptimizerOptimize:
     """Проверка публичного метода optimize."""
+
+    def test_jac_applies_chain_rule_for_log_bandwidth_parameterization(self, monkeypatch):
+        """_jac должен возвращать градиент по theta=log(bandwidth), а не по bandwidth."""
+        pattern_layer = _make_pattern_layer(
+            "per_feature",
+            np.array([0.5, 1.5], dtype=np.float64),
+        )
+        model = DummyGRNNModel(pattern_layer, compute_dtype="float64")
+        captured = {}
+
+        class LossWithGrad:
+            def __call__(self, y_pred, y_true):
+                return 0.0
+
+            def grad(self, X, y, y_pred, model, loo=True, bandwidth=None):
+                captured["bandwidth"] = np.asarray(bandwidth, dtype=np.float64).copy()
+                return np.array([3.0, 5.0], dtype=np.float64)
+
+        optimizer = _make_optimizer(
+            monkeypatch,
+            model,
+            LossWithGrad(),
+            is_pnn_model=False,
+            solver="lbfgs",
+        )
+
+        theta = np.log(np.array([2.0, 4.0], dtype=np.float64))
+        grad_theta = optimizer._jac(
+            theta,
+            model.pattern_layer_.patterns_,
+            model.summation_layer_.y_,
+            model,
+            True,
+        )
+
+        np.testing.assert_allclose(
+            captured["bandwidth"],
+            np.array([2.0, 4.0], dtype=np.float64),
+            rtol=1e-10,
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            grad_theta,
+            np.array([6.0, 20.0], dtype=np.float64),
+            rtol=1e-10,
+            atol=1e-12,
+        )
 
     def test_optimize_calls_minimize_and_updates_model_state(self, monkeypatch):
         """optimize должен вызвать SciPy minimize и синхронизировать состояние модели."""
@@ -321,13 +550,15 @@ class TestBandwidthOptimizerOptimize:
             solver_options={"ftol": 1e-6},
         )
         captured = {}
-        result_x = np.array([0.25, 0.5, 0.75, 1.0], dtype=np.float64)
+        result_x = np.log(np.array([0.25, 0.5, 0.75, 1.0], dtype=np.float64))
 
-        def fake_minimize(fun, theta0, method, bounds, options):
+        def fake_minimize(fun, theta0, method, jac, args, options, **kwargs):
             captured["theta0"] = np.asarray(theta0).copy()
             captured["method"] = method
-            captured["bounds"] = list(bounds)
+            captured["jac"] = jac
+            captured["args"] = args
             captured["options"] = dict(options)
+            captured["bounds"] = kwargs.get("bounds")
             captured["objective_at_theta0"] = fun(theta0)
             return SimpleNamespace(
                 x=result_x,
@@ -344,12 +575,21 @@ class TestBandwidthOptimizerOptimize:
         assert actual is optimizer
         np.testing.assert_allclose(
             captured["theta0"],
-            np.array([1e-4, 2.0, 3.0, 4.0], dtype=np.float64),
+            np.log(np.array([DEFAULT_MIN_BANDWIDTH, 2.0, 3.0, 4.0], dtype=np.float64)),
             rtol=1e-10,
             atol=1e-12,
         )
         assert captured["method"] == "SLSQP"
-        assert captured["bounds"] == [(1e-4, None)] * 4
+        assert captured["jac"] is None
+        assert captured["bounds"] == [
+            (np.log(DEFAULT_MIN_BANDWIDTH), np.log(DEFAULT_MAX_BANDWIDTH))
+        ] * 4
+        assert captured["args"] == (
+            model.pattern_layer_.patterns_,
+            model.summation_layer_.y_,
+            model,
+            True,
+        )
         assert captured["options"] == {"maxiter": 17, "ftol": 1e-6}
         assert captured["objective_at_theta0"] == pytest.approx(0.0)
 
@@ -385,9 +625,9 @@ class TestBandwidthOptimizerOptimize:
             is_pnn_model=False,
         )
 
-        def fake_minimize(fun, theta0, method, bounds, options):
+        def fake_minimize(fun, theta0, method, jac, args, options, **kwargs):
             return SimpleNamespace(
-                x=np.array([0.75, 1.25], dtype=np.float64),
+                x=np.log(np.array([0.75, 1.25], dtype=np.float64)),
                 nit=3,
                 success=False,
                 message="stalled",
@@ -395,7 +635,7 @@ class TestBandwidthOptimizerOptimize:
 
         monkeypatch.setattr(optim_module, "minimize", fake_minimize)
 
-        with pytest.warns(RuntimeWarning, match="Optimization did not converge. Reason: stalled"):
+        with pytest.warns(RuntimeWarning, match=r"Optimization did not converge\. Diagnostics: .*message='stalled'"):
             optimizer.optimize()
 
         np.testing.assert_allclose(optimizer.bandwidth_, np.array([0.75, 1.25], dtype=np.float64))
@@ -403,3 +643,105 @@ class TestBandwidthOptimizerOptimize:
         assert optimizer.converged_ is False
         assert optimizer.n_iter_ == 3
         assert model.pattern_layer_.converged_ is False
+
+    @pytest.mark.parametrize(
+        ("solver", "expects_bounds"),
+        [
+            (solver, _resolve_solver(solver) in BOUNDED_SOLVERS)
+            for solver in sorted(optim_module.SOLVER_REGISTRY)
+        ],
+    )
+    def test_optimize_passes_bounds_only_to_bounded_solvers(self, monkeypatch, solver, expects_bounds):
+        """bounds нужно передавать только алгоритмам, которые их поддерживают."""
+        pattern_layer = _make_pattern_layer(
+            "per_feature",
+            np.array([0.5, 1.5], dtype=np.float64),
+        )
+        model = DummyGRNNModel(pattern_layer, compute_dtype="float64")
+        optimizer = _make_optimizer(
+            monkeypatch,
+            model,
+            lambda y_pred, y_true: 0.0,
+            is_pnn_model=False,
+            solver=solver,
+        )
+        captured = {}
+
+        def fake_minimize(fun, theta0, method, jac, args, options, **kwargs):
+            captured["bounds"] = kwargs.get("bounds")
+            return SimpleNamespace(
+                x=np.asarray(theta0, dtype=np.float64),
+                nit=1,
+                success=True,
+                message="ok",
+            )
+
+        monkeypatch.setattr(optim_module, "minimize", fake_minimize)
+
+        optimizer.optimize()
+
+        if expects_bounds:
+            assert captured["bounds"] == [
+                (np.log(DEFAULT_MIN_BANDWIDTH), np.log(DEFAULT_MAX_BANDWIDTH))
+            ] * 2
+        else:
+            assert captured["bounds"] is None
+
+    @pytest.mark.parametrize(
+        ("solver", "expects_jac"),
+        [
+            ("lbfgs", True),
+            ("bfgs", True),
+            ("cg", True),
+            ("newton_cg", True),
+            ("slsqp", True),
+            ("tnc", True),
+            ("nelder_mead", False),
+            ("powell", False),
+            ("cobyla", False),
+            ("cobyqa", False),
+        ],
+    )
+    def test_optimize_passes_jac_only_for_gradient_solvers(self, monkeypatch, solver, expects_jac):
+        """jac должен передаваться только методам, которые используют аналитический градиент."""
+        pattern_layer = _make_pattern_layer(
+            "per_feature",
+            np.array([0.5, 1.5], dtype=np.float64),
+        )
+        model = DummyGRNNModel(pattern_layer, compute_dtype="float64")
+
+        class LossWithGrad:
+            def __call__(self, y_pred, y_true):
+                return 0.0
+
+            def grad(self, X, y, y_pred, model, loo=True, bandwidth=None):
+                return np.zeros_like(np.asarray(bandwidth, dtype=np.float64))
+
+        optimizer = _make_optimizer(
+            monkeypatch,
+            model,
+            LossWithGrad(),
+            is_pnn_model=False,
+            solver=solver,
+        )
+        captured = {}
+
+        def fake_minimize(fun, theta0, method, jac, args, options, **kwargs):
+            captured["method"] = method
+            captured["jac"] = jac
+            return SimpleNamespace(
+                x=np.asarray(theta0, dtype=np.float64),
+                nit=1,
+                success=True,
+                message="ok",
+            )
+
+        monkeypatch.setattr(optim_module, "minimize", fake_minimize)
+
+        optimizer.optimize()
+
+        assert captured["method"] == _resolve_solver(solver)
+        if expects_jac:
+            assert captured["jac"] == optimizer._jac
+        else:
+            assert captured["jac"] is None

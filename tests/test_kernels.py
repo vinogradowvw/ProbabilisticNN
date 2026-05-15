@@ -3,16 +3,16 @@ import math
 import numpy as np
 import pytest
 
-from probabilisticnn.base.kernels import exponential_kernel
-from probabilisticnn.base.kernels import gaussian_kernel
-from probabilisticnn.base.kernels import laplacian_kernel
+from probabilisticnn.base.kernels import ExponentialKernel
+from probabilisticnn.base.kernels import GaussianKernel
+from probabilisticnn.base.kernels import LaplacianKernel
 from probabilisticnn.base.kernels import resolve_kernel
 
 
 KERNELS = {
-    "gaussian": gaussian_kernel,
-    "laplacian": laplacian_kernel,
-    "exponential": exponential_kernel,
+    "gaussian": GaussianKernel(),
+    "laplacian": LaplacianKernel(),
+    "exponential": ExponentialKernel(),
 }
 FLOAT_DTYPES = (np.float32, np.float64)
 
@@ -263,7 +263,7 @@ class TestKernelMathematicalProperties:
 class TestKernelApiContract:
     @pytest.mark.parametrize("name", ["gaussian", "GAUSSIAN", "Gaussian"])
     def test_resolve_kernel_is_case_insensitive(self, name):
-        assert resolve_kernel(name) is gaussian_kernel
+        assert isinstance(resolve_kernel(name), GaussianKernel)
 
     def test_resolve_kernel_rejects_unknown_name(self):
         with pytest.raises(ValueError, match="Unknown kernel"):

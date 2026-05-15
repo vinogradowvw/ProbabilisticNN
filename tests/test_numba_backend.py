@@ -10,9 +10,9 @@ if importlib.util.find_spec("numba") is None:
     pytest.skip("numba is required for numba_backend tests", allow_module_level=True)
 
 
-from probabilisticnn.base.kernels import exponential_kernel as numpy_exponential_kernel
-from probabilisticnn.base.kernels import gaussian_kernel as numpy_gaussian_kernel
-from probabilisticnn.base.kernels import laplacian_kernel as numpy_laplacian_kernel
+from probabilisticnn.base.kernels import ExponentialKernel
+from probabilisticnn.base.kernels import GaussianKernel
+from probabilisticnn.base.kernels import LaplacianKernel
 from probabilisticnn.grnn.layers import SummationLayer as GRNNSummationLayer
 from probabilisticnn.numba_backend import grnn_jit_inference
 from probabilisticnn.numba_backend import pnn_jit_inference
@@ -23,9 +23,9 @@ from probabilisticnn.numba_backend.kernels import resolve_kernel as resolve_numb
 
 
 NUMPY_KERNELS = {
-    "gaussian": numpy_gaussian_kernel,
-    "laplacian": numpy_laplacian_kernel,
-    "exponential": numpy_exponential_kernel,
+    "gaussian": GaussianKernel(),
+    "laplacian": LaplacianKernel(),
+    "exponential": ExponentialKernel(),
 }
 
 NUMBA_KERNELS = {

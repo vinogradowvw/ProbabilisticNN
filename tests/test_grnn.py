@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 
 import probabilisticnn.grnn.grnn as grnn_module
-from probabilisticnn.base.kernels import gaussian_kernel
+from probabilisticnn.base.loss import HuberLoss
+from probabilisticnn.base.kernels import GaussianKernel
 from probabilisticnn.grnn.grnn import AdaptiveGRNN
 from probabilisticnn.grnn.grnn import GRNN
 from sklearn.exceptions import NotFittedError
@@ -14,7 +15,7 @@ from sklearn.utils.estimator_checks import check_estimator
 FLOAT_DTYPES = (np.float32, np.float64)
 
 KERNELS = {"gaussian", "laplacian", "exponential"}
-LOSSES = {"mse", "mae"}
+LOSSES = {"mse", "mae", "huber"}
 SOLVERS = {"auto", "lbfgs", "slsqp", "nelder_mead", "powell"}
 BACKENDS = {"numpy", "numba"}
 
@@ -24,6 +25,7 @@ def _compute_dtype_name(dtype) -> str:
 
 
 def _manual_grnn_prediction(X, W, y, bandwidth):
+    gaussian_kernel = GaussianKernel()
     K = gaussian_kernel(
         np.asarray(X),
         np.asarray(W),
@@ -188,6 +190,22 @@ class TestAdaptiveGRNN:
         assert model.n_iter_ == optimizer.n_iter_
         assert model.converged_ is optimizer.converged_
         assert model.optimizer_ is optimizer  # оптимизатор передал в объект модели оптимизатора
+
+    def test_fit_accepts_configured_huber_loss_object(self):
+        """AdaptiveGRNN должен принимать сконфигурированный объект loss без новых top-level параметров."""
+        X, y = _regression_dataset(dtype=np.float64)
+        huber = HuberLoss(delta=2.5)
+
+        model = AdaptiveGRNN(
+            kernel="gaussian",
+            loss=huber,
+            normalize=False,
+            compute_dtype="float64",
+        ).fit(X, y)
+
+        optimizer = DummyBandwidthOptimizer.instances[0]
+        assert optimizer.loss is huber
+        assert model.loss is huber
 
     @pytest.mark.parametrize("dtype", FLOAT_DTYPES)
     def test_forward_train_returns_expected_leave_one_out_regression(self, dtype):
