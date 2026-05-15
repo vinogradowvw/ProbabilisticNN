@@ -1,3 +1,5 @@
+import numpy as np
+
 from probabilisticnn.base.optim import BandwidthOptimizer
 from probabilisticnn.common import AdaptivePatternLayer
 from sklearn.base import BaseEstimator, RegressorMixin
@@ -146,3 +148,53 @@ class AdaptiveGRNN(GRNN):
         K_loo = self.pattern_layer_._loo(bandwidth)
         out = self.summation_layer_.transform(K_loo)
         return out
+
+    def grad(self, X, y, bandwidth=None, loo=False):
+        """Compute gradient of the models function.
+        returns shape (n_features,)
+        """
+        if loo:
+            X_for_grad = self.pattern_layer_.patterns_
+            K = self.pattern_layer_._loo(bandwidth)
+        else:
+            X_for_grad = X
+            K = self.pattern_layer_.transform(X)
+
+        pred = self.summation_layer_.transform(K)  # shape (n_samples,)
+
+        K_sum = K.sum(axis=1, keepdims=True)
+
+        w = np.divide(
+            K,
+            K_sum,
+            out=np.zeros_like(K),
+            where=K_sum != 0,
+        )  # shape (n_samples, n_patterns)
+
+        y_patterns = self.summation_layer_.y_  # shape (n_patterns,)
+
+        # coef[i, c] = p_ic * (y_c - f_i)
+        coef = w * (y_patterns[None, :] - pred[:, None])
+
+        log_kernel_grad = self.pattern_layer_.kernel_.log_grad(
+            X_for_grad,
+            self.pattern_layer_.patterns_,
+            bandwidth=bandwidth,
+            bandwidth_sharing=self.pattern_layer_.bandwidth_sharing,
+            normalized=self.pattern_layer_.normalize,
+        )
+
+        if loo:
+            if K.shape[0] != K.shape[1]:
+                raise ValueError("LOO gradient expects square K: n_samples == n_patterns.")
+
+            idx = np.arange(K.shape[0])
+
+            coef[idx, idx] = 0.0
+            log_kernel_grad[idx, idx, ...] = 0.0
+
+        return np.einsum(
+            "ic,ick->ik",
+            coef,
+            log_kernel_grad,
+        )

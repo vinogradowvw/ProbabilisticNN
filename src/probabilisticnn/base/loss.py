@@ -67,24 +67,66 @@ def cross_entropy_loss(y_true, y_pred, f, proba, eps=1e-8):
     return float(-np.mean(np.log(proba[idx, y_true])))
 
 
-def mse_loss(y_pred, y_true):
-    """Mean squared error.
+class MSELoss:
+    def __call__(self, y_pred, y_true):
+        """Mean squared error.
 
-    Среднеквадратичная ошибка.
-    """
-    y_pred = np.asarray(y_pred, dtype=np.float64)
-    y_true = np.asarray(y_true, dtype=np.float64)
-    return float(np.mean(np.square(y_pred - y_true)))
+        Среднеквадратичная ошибка.
+        """
+        y_pred = np.asarray(y_pred, dtype=np.float64)
+        y_true = np.asarray(y_true, dtype=np.float64)
+        return float(np.mean(np.square(y_pred - y_true)))
+
+    def grad(self, X, y, y_pred, model, loo=True, bandwidth=None):
+        """Gradient of the MSE loss.
+        """
+        model_grad = model.grad(X, y, bandwidth=bandwidth, loo=loo)
+        upstream = 2.0 * (y_pred - y) / X.shape[0]
+        grad_loss = upstream @ model_grad
+        return grad_loss
 
 
-def mae_loss(y_pred, y_true):
-    """Mean absolute error.
+class HuberLoss:
+    def __init__(self, delta=1.0):
+        self.delta = float(delta)
 
-    Средняя абсолютная ошибка.
-    """
-    y_pred = np.asarray(y_pred, dtype=np.float64)
-    y_true = np.asarray(y_true, dtype=np.float64)
-    return float(np.mean(np.abs(y_pred - y_true)))
+    def __call__(self, y_pred, y_true):
+        """Huber loss.
+
+        Loss Huber для регрессии.
+        """
+        y_pred = np.asarray(y_pred, dtype=np.float64)
+        y_true = np.asarray(y_true, dtype=np.float64)
+        error = y_pred - y_true
+        abs_error = np.abs(error)
+
+        quadratic = 0.5 * np.square(error)
+        linear = self.delta * (abs_error - 0.5 * self.delta)
+        loss = np.where(abs_error <= self.delta, quadratic, linear)
+        return float(np.mean(loss))
+
+    def grad(self, X, y, y_pred, model, loo=True, bandwidth=None):
+        """Gradient of the Huber loss."""
+        model_grad = model.grad(X, y, bandwidth=bandwidth, loo=loo)
+        error = np.asarray(y_pred, dtype=np.float64) - np.asarray(y, dtype=np.float64)
+        upstream = np.where(
+            np.abs(error) <= self.delta,
+            error,
+            self.delta * np.sign(error),
+        ) / X.shape[0]
+        grad_loss = upstream @ model_grad
+        return grad_loss
+
+
+class MAELoss:
+    def __call__(self, y_pred, y_true):
+        """Mean absolute error.
+
+        Средняя абсолютная ошибка.
+        """
+        y_pred = np.asarray(y_pred, dtype=np.float64)
+        y_true = np.asarray(y_true, dtype=np.float64)
+        return float(np.mean(np.abs(y_pred - y_true)))
 
 
 PNN_LOSS_REGISTRY = {
@@ -95,8 +137,9 @@ PNN_LOSS_REGISTRY = {
 }
 
 GRNN_LOSS_REGISTRY = {
-    "mse": mse_loss,
-    "mae": mae_loss,
+    "mse": MSELoss(),
+    "mae": MAELoss(),
+    "huber": HuberLoss(),
 }
 
 
@@ -109,15 +152,18 @@ def _resolve_loss(loss: str, model):
     from probabilisticnn.grnn.grnn import GRNN
 
     if isinstance(model, PNN):
+        if callable(loss):
+            return loss
         try:
             return PNN_LOSS_REGISTRY[loss.lower()]
         except KeyError as exc:
             available = ", ".join(sorted(PNN_LOSS_REGISTRY))
             raise ValueError(f"Unknown loss={loss!r}. Available: {available}") from exc
     if isinstance(model, GRNN):
+        if callable(loss):
+            return loss
         try:
             return GRNN_LOSS_REGISTRY[loss.lower()]
         except KeyError as exc:
             available = ", ".join(sorted(GRNN_LOSS_REGISTRY))
             raise ValueError(f"Unknown loss={loss!r}. Available: {available}") from exc
-
