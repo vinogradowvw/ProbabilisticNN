@@ -4,18 +4,16 @@ __all__ = [
     "BandwidthOptimizer",
     "KERNEL_REGISTRY",
     "KernelCallable",
-    "gaussian_kernel",
     "normalize_l2",
 ]
 
 
 def __getattr__(name):
-    if name in {"KERNEL_REGISTRY", "gaussian_kernel"}:
-        from probabilisticnn.base.kernels import KERNEL_REGISTRY, gaussian_kernel
+    if name in {"KERNEL_REGISTRY"}:
+        from probabilisticnn.base.kernels import KERNEL_REGISTRY
 
         exports = {
             "KERNEL_REGISTRY": KERNEL_REGISTRY,
-            "gaussian_kernel": gaussian_kernel,
         }
         return exports[name]
 
