@@ -149,11 +149,13 @@ class AdaptiveGRNN(GRNN):
         out = self.summation_layer_.transform(K_loo)
         return out
 
-    def grad(self, X, y, bandwidth=None, loo=False):
+    def grad(self, X, y, bandwidth=None, loo=False, K=None):
         """Compute gradient of the models function.
-        returns shape (n_features,)
+        returns shape (n_samples, n_features)
         """
-        if loo:
+        if K is not None:
+            X_for_grad = self.pattern_layer_.patterns_
+        elif loo:
             X_for_grad = self.pattern_layer_.patterns_
             K = self.pattern_layer_._loo(bandwidth)
         else:
@@ -176,25 +178,30 @@ class AdaptiveGRNN(GRNN):
         # coef[i, c] = p_ic * (y_c - f_i)
         coef = w * (y_patterns[None, :] - pred[:, None])
 
-        log_kernel_grad = self.pattern_layer_.kernel_.log_grad(
-            X_for_grad,
-            self.pattern_layer_.patterns_,
-            bandwidth=bandwidth,
-            bandwidth_sharing=self.pattern_layer_.bandwidth_sharing,
-            normalized=self.pattern_layer_.normalize,
-        )
-
         if loo:
             if K.shape[0] != K.shape[1]:
                 raise ValueError("LOO gradient expects square K: n_samples == n_patterns.")
-
             idx = np.arange(K.shape[0])
-
             coef[idx, idx] = 0.0
-            log_kernel_grad[idx, idx, ...] = 0.0
 
-        return np.einsum(
-            "ic,ick->ik",
-            coef,
-            log_kernel_grad,
-        )
+        if bandwidth is None:
+            bandwidth = self.pattern_layer_.bandwidth_params
+
+        # chunked computation to avoid materialising (n_samples, n_patterns, n_features).
+        from probabilisticnn.base.utils import _log_grad_block_size
+        n_samples = X_for_grad.shape[0]
+        n_patterns = self.pattern_layer_.patterns_.shape[0]
+        n_features = X_for_grad.shape[1]
+        block = _log_grad_block_size(n_samples, n_patterns, n_features)
+        result = np.empty((n_samples, n_features), dtype=X_for_grad.dtype)
+        for start in range(0, n_samples, block):
+            end = min(start + block, n_samples)
+            lg = self.pattern_layer_.kernel_.log_grad(
+                X_for_grad[start:end],
+                self.pattern_layer_.patterns_,
+                bandwidth=bandwidth,
+                bandwidth_sharing=self.pattern_layer_.bandwidth_sharing,
+                normalized=self.pattern_layer_.normalize,
+            )
+            result[start:end] = np.einsum("ic,ick->ik", coef[start:end], lg)
+        return result

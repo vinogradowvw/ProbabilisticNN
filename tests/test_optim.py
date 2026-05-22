@@ -78,6 +78,7 @@ class DummyPNNModel:
     ):
         self.compute_dtype = compute_dtype
         self.pattern_layer_ = pattern_layer
+        self.y_ = np.array(["class_b", "class_a"], dtype=object)
         self.summation_layer_ = SimpleNamespace(last_f_=None)
         self.output_layer_ = DummyOutputLayer(
             y_encoded=np.array([1, 0], dtype=np.intp),
@@ -170,7 +171,7 @@ class TestBandwidthOptimizerHelpers:
     @pytest.mark.parametrize(
         ("solver", "expected"),
         [
-            ("auto", "L-BFGS-B"),
+            ("auto", "SLSQP"),
             ("lbfgs", "L-BFGS-B"),
             ("l_bfgs_b", "L-BFGS-B"),
             ("bfgs", "BFGS"),
@@ -276,7 +277,7 @@ class TestLossGradients:
                     dtype=np.float64,
                 )
 
-            def grad(self, X, y, bandwidth=None, loo=False):
+            def grad(self, X, y, bandwidth=None, loo=False, K=None):
                 bandwidth = np.asarray(bandwidth, dtype=np.float64)
                 b0, b1 = bandwidth
                 return np.array(
@@ -337,7 +338,7 @@ class TestLossGradients:
                     dtype=np.float64,
                 )
 
-            def grad(self, X, y, bandwidth=None, loo=False):
+            def grad(self, X, y, bandwidth=None, loo=False, K=None):
                 bandwidth = np.asarray(bandwidth, dtype=np.float64)
                 b0, b1 = bandwidth
                 return np.array(
@@ -498,7 +499,7 @@ class TestBandwidthOptimizerOptimize:
             def __call__(self, y_pred, y_true):
                 return 0.0
 
-            def grad(self, X, y, y_pred, model, loo=True, bandwidth=None):
+            def grad(self, X, y, y_pred, model, loo=True, bandwidth=None, K=None):
                 captured["bandwidth"] = np.asarray(bandwidth, dtype=np.float64).copy()
                 return np.array([3.0, 5.0], dtype=np.float64)
 
@@ -552,12 +553,12 @@ class TestBandwidthOptimizerOptimize:
         captured = {}
         result_x = np.log(np.array([0.25, 0.5, 0.75, 1.0], dtype=np.float64))
 
-        def fake_minimize(fun, theta0, method, jac, args, options, **kwargs):
+        def fake_minimize(fun, theta0, method=None, jac=None, args=(), options=None, **kwargs):
             captured["theta0"] = np.asarray(theta0).copy()
             captured["method"] = method
             captured["jac"] = jac
             captured["args"] = args
-            captured["options"] = dict(options)
+            captured["options"] = dict(options) if options else {}
             captured["bounds"] = kwargs.get("bounds")
             captured["objective_at_theta0"] = fun(theta0)
             return SimpleNamespace(
@@ -584,12 +585,7 @@ class TestBandwidthOptimizerOptimize:
         assert captured["bounds"] == [
             (np.log(DEFAULT_MIN_BANDWIDTH), np.log(DEFAULT_MAX_BANDWIDTH))
         ] * 4
-        assert captured["args"] == (
-            model.pattern_layer_.patterns_,
-            model.summation_layer_.y_,
-            model,
-            True,
-        )
+        assert captured["args"] == ()
         assert captured["options"] == {"maxiter": 17, "ftol": 1e-6}
         assert captured["objective_at_theta0"] == pytest.approx(0.0)
 
@@ -610,6 +606,75 @@ class TestBandwidthOptimizerOptimize:
         assert model.pattern_layer_.n_iter_ == 7
         np.testing.assert_allclose(model.bandwidth_, expected_bandwidth, rtol=1e-6, atol=1e-7)
 
+    def test_objective_and_jac_uses_pnn_labels_in_gradient(self, monkeypatch):
+        """В PNN-ветке _objective_and_jac должен передавать в loss.grad model.y_, а не GRNN-targets."""
+        n_features = 2
+        n_patterns = 4
+        patterns = np.zeros((n_patterns, n_features), dtype=np.float64)
+        y_labels = np.array(["a", "a", "b", "b"], dtype=object)
+        y_encoded = np.array([0, 0, 1, 1], dtype=np.intp)
+        f_fixed = np.array([[0.3, 0.7], [0.6, 0.4], [0.2, 0.8], [0.5, 0.5]], dtype=np.float64)
+        K_fixed = np.eye(n_patterns, dtype=np.float64)
+
+        class _FakePatternLayer:
+            bandwidth_sharing = "per_feature"
+            bandwidth_params = np.ones(n_features, dtype=np.float64)
+            feature_size = n_features
+            n_classes_ = 2
+            patterns_ = patterns
+            normalize = False
+            bandwidth_ = np.ones(n_features, dtype=np.float64)
+
+            def _loo(self, bandwidth):
+                return K_fixed.copy()
+
+            def _prepare_bandwidth(self, bw):
+                return np.asarray(bw, dtype=np.float64)
+
+        class _FakeSummationLayer:
+            y_encoded_ = y_encoded
+
+            def transform(self, K):
+                self.last_f_ = f_fixed.copy()
+                return f_fixed.copy()
+
+        class _FakeOutputLayer:
+            y_encoded_ = y_encoded
+            prior_ = np.array([0.5, 0.5], dtype=np.float64)
+
+            def posteriori(self, f):
+                denom = f.sum(axis=1, keepdims=True)
+                return f / np.maximum(denom, 1e-12)
+
+            def transform_encoded(self, f):
+                return np.argmax(f, axis=1)
+
+        class _FakePNNModel:
+            y_ = y_labels
+            pattern_layer_ = _FakePatternLayer()
+            summation_layer_ = _FakeSummationLayer()
+            output_layer_ = _FakeOutputLayer()
+            compute_dtype = "float64"
+
+        model = _FakePNNModel()
+        captured = {}
+
+        class LossWithGrad:
+            def __call__(self, y_true, y_pred, f, proba):
+                return 0.0
+
+            def grad(self, X, y, y_pred, model, loo=True, bandwidth=None, K=None):
+                captured["y"] = np.asarray(y).copy()
+                return np.zeros(n_features, dtype=np.float64)
+
+        monkeypatch.setattr(optim_module, "_resolve_loss", lambda loss, model_arg: LossWithGrad())
+        optimizer = BandwidthOptimizer(model=model, loss="dummy", max_iter=1, solver="lbfgs")
+        monkeypatch.setattr(optimizer, "_is_pnn_model", lambda: True)
+
+        optimizer._objective_and_jac(np.zeros(n_features, dtype=np.float64))
+
+        np.testing.assert_array_equal(captured["y"], y_labels)
+
     def test_optimize_warns_when_minimize_does_not_converge(self, monkeypatch):
         """При success=False оптимизатор должен сохранить результат и поднять warning."""
         pattern_layer = _make_pattern_layer(
@@ -625,7 +690,7 @@ class TestBandwidthOptimizerOptimize:
             is_pnn_model=False,
         )
 
-        def fake_minimize(fun, theta0, method, jac, args, options, **kwargs):
+        def fake_minimize(fun, theta0, method=None, jac=None, args=(), options=None, **kwargs):
             return SimpleNamespace(
                 x=np.log(np.array([0.75, 1.25], dtype=np.float64)),
                 nit=3,
@@ -667,7 +732,7 @@ class TestBandwidthOptimizerOptimize:
         )
         captured = {}
 
-        def fake_minimize(fun, theta0, method, jac, args, options, **kwargs):
+        def fake_minimize(fun, theta0, method=None, jac=None, args=(), options=None, **kwargs):
             captured["bounds"] = kwargs.get("bounds")
             return SimpleNamespace(
                 x=np.asarray(theta0, dtype=np.float64),
@@ -714,7 +779,7 @@ class TestBandwidthOptimizerOptimize:
             def __call__(self, y_pred, y_true):
                 return 0.0
 
-            def grad(self, X, y, y_pred, model, loo=True, bandwidth=None):
+            def grad(self, X, y, y_pred, model, loo=True, bandwidth=None, K=None):
                 return np.zeros_like(np.asarray(bandwidth, dtype=np.float64))
 
         optimizer = _make_optimizer(
@@ -726,7 +791,7 @@ class TestBandwidthOptimizerOptimize:
         )
         captured = {}
 
-        def fake_minimize(fun, theta0, method, jac, args, options, **kwargs):
+        def fake_minimize(fun, theta0, method=None, jac=None, args=(), options=None, **kwargs):
             captured["method"] = method
             captured["jac"] = jac
             return SimpleNamespace(
@@ -742,6 +807,6 @@ class TestBandwidthOptimizerOptimize:
 
         assert captured["method"] == _resolve_solver(solver)
         if expects_jac:
-            assert captured["jac"] == optimizer._jac
+            assert captured["jac"] is True
         else:
             assert captured["jac"] is None

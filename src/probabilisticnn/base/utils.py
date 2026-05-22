@@ -56,6 +56,15 @@ def as_bandwidth_array(bandwidth, dtype=None):
     return arr
 
 
+_LOG_GRAD_BYTES_TARGET = 256 * 1024 * 1024  # 256 MB
+
+
+def _log_grad_block_size(n_samples: int, n_patterns: int, n_features: int, itemsize: int = 8) -> int:
+    """Row block size that keeps a (block, n_patterns, n_features) chunk under 256 MB."""
+    elements = max(1, _LOG_GRAD_BYTES_TARGET // (n_patterns * n_features * itemsize))
+    return min(elements, n_samples)
+
+
 def pattern_block_size(
     n_patterns: int,
     n_features: int,

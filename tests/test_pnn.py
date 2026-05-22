@@ -1,8 +1,15 @@
 """Тесты для PNN и AdaptivePNN estimator-ов."""
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
 import probabilisticnn.pnn.pnn as pnn_module
+from probabilisticnn.base.loss import BCELoss
+from probabilisticnn.base.loss import CrossEntropyLoss
+from probabilisticnn.pnn.layers import OutputLayer
+from probabilisticnn.pnn.layers import SummationLayer
+from probabilisticnn.common.pattern_layer import AdaptivePatternLayer
 from probabilisticnn.pnn.pnn import AdaptivePNN
 from probabilisticnn.pnn.pnn import PNN
 from sklearn.exceptions import NotFittedError
@@ -35,6 +42,67 @@ def _classification_dataset(dtype=np.float64):
     y_int = np.array([0, 0, 1, 1])
     y_str = np.array(["class_a", "class_a", "class_b", "class_b"])
     return X, y_int, y_str
+
+
+def _classification_gradient_dataset(dtype=np.float64):
+    """Dataset with non-zero within-class variance on every feature for gradient checks."""
+    X = np.array(
+        [
+            [0.0, 0.0],
+            [0.2, 0.1],
+            [10.0, 10.0],
+            [10.3, 10.2],
+        ],
+        dtype=dtype,
+    )
+    y_int = np.array([0, 0, 1, 1])
+    y_str = np.array(["class_a", "class_a", "class_b", "class_b"])
+    return X, y_int, y_str
+
+
+def _finite_difference_grad(fun, x, eps=1e-6):
+    x = np.asarray(x, dtype=np.float64)
+    grad = np.zeros_like(x)
+
+    it = np.ndindex(x.shape)
+    for idx in it:
+        step_size = eps
+        if x[idx] > 0:
+            step_size = min(eps, 0.49 * x[idx])
+
+        x_plus = x.copy()
+        x_minus = x.copy()
+        x_plus[idx] += step_size
+        x_minus[idx] -= step_size
+        grad[idx] = (fun(x_plus) - fun(x_minus)) / (2.0 * step_size)
+
+    return grad
+
+
+def _make_pnn_loss_gradient_model(X, y, bandwidth_sharing):
+    pattern_layer = AdaptivePatternLayer(
+        kernel="gaussian",
+        bandwidth_sharing=bandwidth_sharing,
+        normalize=False,
+        backend="numpy",
+        compute_dtype="float64",
+    ).fit(X, y)
+    summation_layer = SummationLayer().fit(X, y)
+    output_layer = OutputLayer("uniform", "float64").fit(y)
+    return SimpleNamespace(
+        pattern_layer_=pattern_layer,
+        summation_layer_=summation_layer,
+        output_layer_=output_layer,
+    )
+
+
+def _pnn_loss_value(loss_fn, model, y, bandwidth):
+    K = model.pattern_layer_._loo(bandwidth)
+    f = model.summation_layer_.transform(K)
+    proba = model.output_layer_.posteriori(f)
+    y_pred = model.output_layer_.transform_encoded(f)
+    y_true = model.output_layer_.y_encoded_
+    return loss_fn(y_true, y_pred, f, proba)
 
 
 class DummyBandwidthOptimizer:
@@ -230,3 +298,34 @@ class TestAdaptivePNN:
 
         with pytest.raises(NotFittedError):
             getattr(model, method_name)(np.array([[0.0, 0.0]], dtype=np.float64))
+
+
+class TestPNNLossGradients:
+    """Проверка градиентов PNN loss-функций."""
+
+    @pytest.mark.parametrize("bandwidth_sharing", ["per_class", "per_class_per_feature"])
+    @pytest.mark.parametrize("loss_fn", [BCELoss(), CrossEntropyLoss()])
+    def test_loss_grad_matches_finite_differences(self, bandwidth_sharing, loss_fn):
+        """Градиент BCE/CrossEntropy должен совпадать с численной производной по bandwidth."""
+        X, y, _ = _classification_gradient_dataset(dtype=np.float64)
+        model = _make_pnn_loss_gradient_model(X, y, bandwidth_sharing)
+        bandwidth = np.asarray(model.pattern_layer_.bandwidth_params, dtype=np.float64).copy()
+
+        K = model.pattern_layer_._loo(bandwidth)
+        f = model.summation_layer_.transform(K)
+        y_pred = model.output_layer_.transform_encoded(f)
+
+        analytic = loss_fn.grad(
+            X,
+            y,
+            y_pred,
+            model,
+            loo=True,
+            bandwidth=bandwidth,
+        )
+        numeric = _finite_difference_grad(
+            lambda bw: _pnn_loss_value(loss_fn, model, y, bw),
+            bandwidth,
+        )
+
+        np.testing.assert_allclose(analytic, numeric, rtol=1e-4, atol=1e-5)

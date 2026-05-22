@@ -104,6 +104,15 @@ class BandwidthOptimizer:
         y_pred = self.model._forward_train(bandwidth)
         return y_pred, None, None
 
+    def _gradient_args(self):
+        """Build additional arguments for scipy.optimize.minimize jac callback."""
+        X = self.model.pattern_layer_.patterns_
+        if self._is_pnn_model():
+            y = self.model.y_
+        else:
+            y = self.model.summation_layer_.y_
+        return (X, y, self.model, True)
+
     def _bandwidth_limits(self):
         """Return safe lower/upper bounds for bandwidth parameters."""
         min_bandwidth = float(getattr(self.model, "min_bandwidth", DEFAULT_MIN_BANDWIDTH))
@@ -213,6 +222,45 @@ class BandwidthOptimizer:
         grad_theta = grad_bandwidth * np.asarray(bandwidth, dtype=np.float64)
         return np.ravel(grad_theta)
 
+    def _objective_and_jac(self, theta):
+        """Compute loss and gradient in one pass, sharing a single LOO kernel evaluation.
+
+        Returns (loss, grad_theta) as required by scipy when jac=True.
+        """
+        theta = np.asarray(theta, dtype=np.float64)
+        if not self._theta_is_safe(theta):
+            return INVALID_OBJECTIVE, np.zeros_like(theta)
+
+        bandwidth = self._unpack_bandwidth(theta)
+        if not np.isfinite(bandwidth).all() or np.any(bandwidth <= 0):
+            return INVALID_OBJECTIVE, np.zeros_like(theta)
+
+        # Single _loo call shared by both the loss value and the gradient.
+        K = self.model.pattern_layer_._loo(bandwidth)
+
+        X = self.model.pattern_layer_.patterns_
+        if self._is_pnn_model():
+            f = self.model.summation_layer_.transform(K)
+            proba = self.model.output_layer_.posteriori(f)
+            y_pred = self.model.output_layer_.transform_encoded(f)
+            y_true = self.model.output_layer_.y_encoded_
+            y = self.model.y_
+            loss = self.loss_fn_(y_true, y_pred, f, proba)
+        else:
+            y_pred = self.model.summation_layer_.transform(K)
+            y = self.model.summation_layer_.y_
+            loss = self.loss_fn_(y_pred, y)
+
+        if not np.isfinite(loss):
+            return INVALID_OBJECTIVE, np.zeros_like(theta)
+
+        grad_bandwidth = np.asarray(
+            self.loss_fn_.grad(X, y, y_pred, self.model, loo=True, bandwidth=bandwidth, K=K),
+            dtype=np.float64,
+        )
+        grad_theta = grad_bandwidth * np.asarray(bandwidth, dtype=np.float64)
+        return float(loss), np.ravel(grad_theta)
+
     def optimize(self):
         """Optimize bandwidths and store the best observed parameters.
 
@@ -227,23 +275,29 @@ class BandwidthOptimizer:
         if self.solver in BOUNDED_SOLVERS:
             minimize_kwargs["bounds"] = [(theta_min, theta_max)] * theta0.size
 
-        result = minimize(
-            self._objective,
-            theta0,
-            method=self.solver,
-            jac=self._jac if uses_gradient else None,
-            args=(
-                self.model.pattern_layer_.patterns_,
-                self.model.summation_layer_.y_,
-                self.model,
-                True,
-            ),
-            options={
-                "maxiter": self.max_iter,
-                **(self.solver_options or {}),
-            },
-            **minimize_kwargs,
-        )
+        if uses_gradient:
+            result = minimize(
+                self._objective_and_jac,
+                theta0,
+                method=self.solver,
+                jac=True,
+                options={
+                    "maxiter": self.max_iter,
+                    **(self.solver_options or {}),
+                },
+                **minimize_kwargs,
+            )
+        else:
+            result = minimize(
+                self._objective,
+                theta0,
+                method=self.solver,
+                options={
+                    "maxiter": self.max_iter,
+                    **(self.solver_options or {}),
+                },
+                **minimize_kwargs,
+            )
 
         bandwidth = cast_to_dtype(self._unpack_bandwidth(result.x), self._infer_dtype())
 
