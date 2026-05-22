@@ -1,44 +1,44 @@
 # ProbabilisticNN
 
-`ProbabilisticNN` — Python-библиотека для Probabilistic Neural Networks и General Regression Neural Networks со sklearn-подобным интерфейсом.
+`ProbabilisticNN` is a Python library for Probabilistic Neural Networks and General Regression Neural Networks with an sklearn-like interface.
 
-На текущем этапе библиотека опубликована на TestPyPI и поддерживает:
+At the current stage, the library is published on TestPyPI and supports:
 
-- `PNN` для классификации;
-- `AdaptivePNN` с подбором параметров ширины ядра;
-- `GRNN` для регрессии;
-- `AdaptiveGRNN` с оптимизацией ширины ядра;
-- выполнение на обычной реализации `numpy`;
-- ускоренный вывод результата через `numba`.
+- `PNN` for classification;
+- `AdaptivePNN` with kernel bandwidth parameter tuning;
+- `GRNN` for regression;
+- `AdaptiveGRNN` with kernel bandwidth optimization;
+- execution using the standard `numpy` implementation;
+- accelerated inference via `numba`.
 
-## Основные возможности
+## Main Features
 
-- sklearn-подобный интерфейс: `fit`, `predict`, `predict_proba`;
-- несколько ядерных функций:
+- sklearn-like interface: `fit`, `predict`, `predict_proba`;
+- several kernel functions:
   - `gaussian`;
   - `laplacian`;
   - `exponential`;
-- несколько схем параметризации ширины ядра для `AdaptivePNN`:
+- several kernel bandwidth parameterization schemes for `AdaptivePNN`:
   - `per_feature`;
   - `per_class`;
   - `per_class_per_feature`;
-- ускоренный backend `numba` для вычислительно тяжелой части вывода результата;
-- тестирование через `pytest` и `tox`.
+- accelerated `numba` backend for the computationally heavy part of inference;
+- testing via `pytest` and `tox`.
 
-## Требования
+## Requirements
 
 - Python `3.12+`
 - `numpy`
 - `scipy`
 - `scikit-learn`
 
-Для ускоренного backend дополнительно нужна `numba`.
+For the accelerated backend, `numba` is additionally required.
 
-## Установка
+## Installation
 
-### Установка из TestPyPI
+### Installation from TestPyPI
 
-Для обычного использования без `numba`:
+For regular usage without `numba`:
 
 ```bash
 python -m pip install \
@@ -47,7 +47,7 @@ python -m pip install \
   "ProbabilisticNN"
 ```
 
-Для установки с `numba` backend:
+For installation with the `numba` backend:
 
 ```bash
 python -m pip install \
@@ -56,7 +56,7 @@ python -m pip install \
   "ProbabilisticNN[numba]"
 ```
 
-Для разработки и тестирования:
+For development and testing:
 
 ```bash
 python -m pip install \
@@ -65,17 +65,18 @@ python -m pip install \
   "ProbabilisticNN[dev]"
 ```
 
-### Локальная установка из репозитория
-Для это нужны setuptools.
+### Local Installation from the Repository
+
+This requires `setuptools`.
 
 ```bash
 python -m build
 python -m pip install -e ".[dev]"
 ```
 
-## Быстрый старт
+## Quick Start
 
-### Классификация с `PNN`
+### Classification with `PNN`
 
 ```python
 import numpy as np
@@ -110,7 +111,7 @@ print(labels)
 print(proba)
 ```
 
-### Классификация с `AdaptivePNN`
+### Classification with `AdaptivePNN`
 
 ```python
 import numpy as np
@@ -140,7 +141,7 @@ print(model.predict_proba(X_train))
 print(model.bandwidth_)
 ```
 
-### Регрессия с `GRNN`
+### Regression with `GRNN`
 
 ```python
 import numpy as np
@@ -172,7 +173,7 @@ pred = model.predict(X_test)
 print(pred)
 ```
 
-### Регрессия с `AdaptiveGRNN`
+### Regression with `AdaptiveGRNN`
 
 ```python
 import numpy as np
@@ -200,14 +201,14 @@ print(model.predict(X_train))
 print(model.bandwidth_)
 ```
 
-## Ускорение через `numba`
+## Acceleration with `numba`
 
-Для `PNN`, `AdaptivePNN`, `GRNN` и `AdaptiveGRNN` можно выбрать:
+For `PNN`, `AdaptivePNN`, `GRNN`, and `AdaptiveGRNN`, you can choose:
 
-- `backend="numpy"` — основной вариант;
-- `backend="numba"` — ускоренный вариант.
+- `backend="numpy"` — the main option;
+- `backend="numba"` — the accelerated option.
 
-Пример:
+Example:
 
 ```python
 from probabilisticnn.pnn import PNN
@@ -220,47 +221,47 @@ model = PNN(
 )
 ```
 
-Важно:
+Important:
 
-- первый вызов `predict` для `numba`-ветки может быть медленнее из-за JIT-компиляции;
-- основной выигрыш по скорости достигается на этапе вычисления значений ядерных функций;
-- если `numba` не установлена, backend `numba` будет недоступен.
+- the first `predict` call for the `numba` branch may be slower because of JIT compilation;
+- the main speed gain is achieved during the computation of kernel function values;
+- if `numba` is not installed, the `numba` backend will be unavailable.
 
-## Публичный интерфейс
+## Public Interface
 
-Импортировать модели следует так:
+Models should be imported like this:
 
 ```python
 from probabilisticnn.pnn import PNN, AdaptivePNN
 from probabilisticnn.grnn import GRNN, AdaptiveGRNN
 ```
 
-## Параметры моделей
+## Model Parameters
 
 ### `PNN`
 
-Основные параметры:
+Main parameters:
 
-- `bandwidth` — фиксированная ширина ядра;
-- `kernel` — тип ядра;
-- `losses` — схема весов классов (ошибка неправильной классификации классов);
-- `normalize` — использовать ли L2-нормализацию входов;
-- `backend` — `numpy` или `numba`;
+- `bandwidth` — fixed kernel bandwidth;
+- `kernel` — kernel type;
+- `losses` — class weighting scheme / misclassification cost for classes;
+- `normalize` — whether to use L2 normalization of inputs;
+- `backend` — `numpy` or `numba`;
 - `compute_dtype` — `auto`, `float32`, `float64`.
 
 ### `AdaptivePNN`
 
-Дополнительно поддерживает:
+Additionally supports:
 
-- `loss` — целевая функция оптимизации;
-- `bandwidth_sharing` — способ задания параметров ширины;
-- `max_iter` — максимальное число шагов оптимизации;
-- `solver` — метод оптимизации;
-- `solver_options` — дополнительные параметры оптимизатора.
+- `loss` — optimization objective function;
+- `bandwidth_sharing` — method for defining bandwidth parameters;
+- `max_iter` — maximum number of optimization steps;
+- `solver` — optimization method;
+- `solver_options` — additional optimizer parameters.
 
 ### `GRNN`
 
-Основные параметры:
+Main parameters:
 
 - `bandwidth`;
 - `kernel`;
@@ -270,44 +271,45 @@ from probabilisticnn.grnn import GRNN, AdaptiveGRNN
 
 ### `AdaptiveGRNN`
 
-Дополнительно поддерживает:
+Additionally supports:
 
-- `loss` — функция ошибки для регрессии;
+- `loss` — loss function for regression;
 - `max_iter`;
 - `solver`;
 - `solver_options`;
 - `normalize`.
 
-`AdaptiveGRNN` оптимизирует ширину ядра по схеме `per_feature`.
+`AdaptiveGRNN` optimizes the kernel bandwidth using the `per_feature` scheme.
 
-## Тестирование
+## Testing
 
-Предпочтительный способ запуска тестов:
+Preferred way to run tests:
 
 ```bash
 tox
 ```
 
-Или запуск конкретного файла тестов:
+Or run a specific test file:
 
 ```bash
 pytest tests/test_pnn.py
 ```
 
-Так как тесты импортируют установленный пакет, удобнее всего запускать их в подготовленном окружении после установки зависимостей.
+Since the tests import the installed package, it is most convenient to run them in a prepared environment after installing the dependencies.
 
-## Производительность
+## Performance
 
-В репозитории есть отдельные материалы для измерения производительности:
+The repository contains separate materials for measuring performance:
 
 - [benchmarks/inference_bemchmarks.py](benchmarks/inference_bemchmarks.py)
 - [benchmarks/benchmarking.ipynb](benchmarks/benchmarking.ipynb)
 
-## Примеры
+## Examples
 
-Дополнительный пример использования находится в:
+An additional usage example is located at:
 
 - [examples/basic_usage.ipynb](examples/basic_usage.ipynb)
 
-## Лицензия
-Проект распространяется по лицензии MIT. См. файл [LICENCE](LICENCE).
+## License
+
+The project is distributed under the MIT license. See the [LICENCE](LICENCE) file.
