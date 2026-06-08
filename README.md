@@ -41,28 +41,19 @@ For the accelerated backend, `numba` is additionally required.
 For regular usage without `numba`:
 
 ```bash
-python -m pip install \
-  --index-url https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ \
-  "ProbabilisticNN"
+python -m pip install ProbabilisticNN
 ```
 
 For installation with the `numba` backend:
 
 ```bash
-python -m pip install \
-  --index-url https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ \
-  "ProbabilisticNN[numba]"
+python -m pip install "ProbabilisticNN[numba]"
 ```
 
 For development and testing:
 
 ```bash
-python -m pip install \
-  --index-url https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ \
-  "ProbabilisticNN[dev]"
+python -m pip install "ProbabilisticNN[dev]"
 ```
 
 ### Local Installation from the Repository
