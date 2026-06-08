@@ -2,11 +2,7 @@ import numpy as np
 
 
 def log_likelihood_ratio_loss(y_true, y_pred, f, proba=None, eps=1e-8):
-    """Minimize the negative true-vs-competitor log likelihood ratio.
-
-    Минимизирует отрицательное логарифмическое отношение правдоподобия
-    истинного класса к ближайшему конкурирующему классу.
-    """
+    """Minimize the negative true-vs-competitor log likelihood ratio."""
     y_true = np.asarray(y_true, dtype=np.intp)
 
     if f.shape[1] < 2:
@@ -23,10 +19,7 @@ def log_likelihood_ratio_loss(y_true, y_pred, f, proba=None, eps=1e-8):
 
 
 def correct_class_probability_loss(y_true, y_pred, f, proba, eps=1e-8):
-    """Maximize the posterior probability assigned to the correct class.
-
-    Максимизирует апостериорную вероятность, назначенную правильному классу.
-    """
+    """Maximize the posterior probability assigned to the correct class."""
     y_true = np.asarray(y_true, dtype=np.intp)
     idx = np.arange(proba.shape[0], dtype=np.intp)
     return float(-np.mean(proba[idx, y_true]))
@@ -95,10 +88,7 @@ def _chunked_grad_contract(
 
 class BCELoss:
     def __call__(self, y_true, y_pred, f, proba, eps=1e-8):
-        """Binary or multiclass BCE over posterior probabilities.
-
-        Binary или multiclass BCE по апостериорным вероятностям.
-        """
+        """Binary or multiclass BCE over posterior probabilities."""
         proba = np.clip(np.asarray(proba, dtype=proba.dtype), eps, 1.0 - eps)
         y_true = np.asarray(y_true)
 
@@ -219,61 +209,26 @@ class BCELoss:
         pattern_classes,
         n_classes,
     ):
-        """
-        Собирает градиент в форме bandwidth.
-
-        coef:
-            shape (n_samples, n_patterns)
-
-        log_kernel_grad:
-            scalar:
-                shape (n_samples, n_patterns)
-
-            per_feature:
-                shape (n_samples, n_patterns, n_features)
-
-            per_class:
-                shape (n_samples, n_patterns)
-
-            per_class_per_feature:
-                shape (n_samples, n_patterns, n_features)
-        """
-
+        # coef: (n_samples, n_patterns)
+        # log_kernel_grad: (n_samples, n_patterns) for scalar/per_class,
+        #                  (n_samples, n_patterns, n_features) for per_feature/per_class_per_feature
         if bandwidth_sharing == "scalar":
             return np.sum(coef * log_kernel_grad)
 
         if bandwidth_sharing == "per_feature":
-            return np.einsum(
-                "ij,ijd->d",
-                coef,
-                log_kernel_grad,
-            )
+            return np.einsum("ij,ijd->d", coef, log_kernel_grad)
 
         if bandwidth_sharing == "per_class":
-            # log_kernel_grad shape: (n_samples, n_patterns)
-            # сначала градиент на каждый pattern
             per_pattern_grad = np.sum(coef * log_kernel_grad, axis=0)
-
-            # потом суммируем по классам pattern-ов
             grad = np.zeros(n_classes, coef.dtype)
             np.add.at(grad, pattern_classes, per_pattern_grad)
-
             return grad
 
         if bandwidth_sharing == "per_class_per_feature":
-            # log_kernel_grad shape: (n_samples, n_patterns, n_features)
-            # сначала получаем gradient на каждый pattern и feature
-            per_pattern_feature_grad = np.einsum(
-                "ij,ijd->jd",
-                coef,
-                log_kernel_grad,
-            )
-
+            per_pattern_feature_grad = np.einsum("ij,ijd->jd", coef, log_kernel_grad)
             n_features = per_pattern_feature_grad.shape[1]
-
             grad = np.zeros((n_classes, n_features), dtype=coef.dtype)
             np.add.at(grad, pattern_classes, per_pattern_feature_grad)
-
             return grad
 
         raise ValueError(f"Unknown bandwidth_sharing={bandwidth_sharing!r}.")
@@ -281,10 +236,7 @@ class BCELoss:
 
 class CrossEntropyLoss:
     def __call__(self, y_true, y_pred, f, proba, eps=1e-8):
-        """Cross entropy over posterior probabilities.
-
-        Cross entropy по апостериорным вероятностям.
-        """
+        """Cross entropy over posterior probabilities."""
         proba = np.clip(np.asarray(proba, dtype=proba.dtype), eps, 1.0 - eps)
         y_true = np.asarray(y_true, dtype=np.intp)
         idx = np.arange(proba.shape[0], dtype=np.intp)
@@ -377,59 +329,26 @@ class CrossEntropyLoss:
         pattern_classes,
         n_classes,
     ):
-        """
-        Собирает градиент в форме bandwidth.
-
-        coef:
-            shape (n_samples, n_patterns)
-
-        log_kernel_grad:
-            scalar:
-                shape (n_samples, n_patterns)
-
-            per_feature:
-                shape (n_samples, n_patterns, n_features)
-
-            per_class:
-                shape (n_samples, n_patterns)
-
-            per_class_per_feature:
-                shape (n_samples, n_patterns, n_features)
-        """
-
+        # coef: (n_samples, n_patterns)
+        # log_kernel_grad: (n_samples, n_patterns) for scalar/per_class,
+        #                  (n_samples, n_patterns, n_features) for per_feature/per_class_per_feature
         if bandwidth_sharing == "scalar":
             return np.sum(coef * log_kernel_grad)
 
         if bandwidth_sharing == "per_feature":
-            return np.einsum(
-                "ij,ijd->d",
-                coef,
-                log_kernel_grad,
-            )
+            return np.einsum("ij,ijd->d", coef, log_kernel_grad)
 
         if bandwidth_sharing == "per_class":
-            # Сначала градиент на каждый pattern
             per_pattern_grad = np.sum(coef * log_kernel_grad, axis=0)
-
-            # Потом суммируем patterns одного класса
             grad = np.zeros(n_classes, dtype=coef.dtype)
             np.add.at(grad, pattern_classes, per_pattern_grad)
-
             return grad
 
         if bandwidth_sharing == "per_class_per_feature":
-            # shape: (n_patterns, n_features)
-            per_pattern_feature_grad = np.einsum(
-                "ij,ijd->jd",
-                coef,
-                log_kernel_grad,
-            )
-
+            per_pattern_feature_grad = np.einsum("ij,ijd->jd", coef, log_kernel_grad)
             n_features = per_pattern_feature_grad.shape[1]
-
             grad = np.zeros((n_classes, n_features), dtype=coef.dtype)
             np.add.at(grad, pattern_classes, per_pattern_feature_grad)
-
             return grad
 
         raise ValueError(f"Unknown bandwidth_sharing={bandwidth_sharing!r}.")
@@ -438,10 +357,7 @@ class CrossEntropyLoss:
 class MSELoss:
 
     def __call__(self, y_pred, y_true):
-        """Mean squared error.
-
-        Среднеквадратичная ошибка.
-        """
+        """Mean squared error."""
         y_pred = np.asarray(y_pred)
         y_true = np.asarray(y_true)
         return float(np.mean(np.square(y_pred - y_true)))
@@ -459,10 +375,7 @@ class HuberLoss:
         self.delta = float(delta)
 
     def __call__(self, y_pred, y_true):
-        """Huber loss.
-
-        Loss Huber для регрессии.
-        """
+        """Huber loss."""
         y_pred = np.asarray(y_pred)
         y_true = np.asarray(y_true)
         error = y_pred - y_true
@@ -488,10 +401,7 @@ class HuberLoss:
 
 class MAELoss:
     def __call__(self, y_pred, y_true):
-        """Mean absolute error.
-
-        Средняя абсолютная ошибка.
-        """
+        """Mean absolute error."""
         y_pred = np.asarray(y_pred)
         y_true = np.asarray(y_true)
         return float(np.mean(np.abs(y_pred - y_true)))
@@ -512,10 +422,7 @@ GRNN_LOSS_REGISTRY = {
 
 
 def _resolve_loss(loss: str, model):
-    """Resolve a string loss name into a callable loss function.
-
-    Преобразует строковое имя loss-функции в вызываемую функцию.
-    """
+    """Resolve a string loss name into a callable loss function."""
     from probabilisticnn.pnn.pnn import PNN
     from probabilisticnn.grnn.grnn import GRNN
 

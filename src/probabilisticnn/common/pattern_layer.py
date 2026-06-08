@@ -7,14 +7,7 @@ from probabilisticnn.base.utils import as_bandwidth_array
 
 
 class PatternLayer(TransformerMixin, BaseEstimator):
-    """Map input samples to kernel responses over the reference set.
-
-    Класс преобразования входных данных в матрицу ядра с использованием
-
-    - bandwidth: float or array-like with shape(batch_size, n_patterns, n_features)
-    - kernel: str
-    - normalize: bool
-    """
+    """Map input samples to kernel responses over the reference set."""
 
     def __init__(
         self,
@@ -50,20 +43,9 @@ class PatternLayer(TransformerMixin, BaseEstimator):
 
 
 class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
-    """Map input samples to kernel responses over the reference set.
+    """Map input samples to kernel responses with optimizable bandwidth parameters.
 
-    Класс преобразования входных данных в матрицу ядра с использованием оптимизации по значению ширины
-
-    Uses optimization over a loss function for the bandwidth parameters
-    Possible parameters sharing types:
-    - per class bandwidth
-    - per feature bandwidth
-    - per class per feature bandwidth
-
-    Возможные типы параметризации параметров ширины:
-    - отдельная ширина для каждого класса
-    - отдельная ширина для каждого признака
-    - отдельная ширина для каждого класса по каждому признаку
+    Bandwidth can be shared per feature, per class, or per class per feature.
     """
 
     def __init__(
@@ -93,9 +75,8 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
 
         self.feature_size = X.shape[1]
 
-        # bandwidth parameter initialization based on the bandwidth_sharing strategy
+        # initialize bandwidth from data std to give optimizer a sensible starting point
         if self.bandwidth_sharing == "per_feature":
-            # initialization with the std of the pattern data (per-feature)
             std = cast_to_dtype(np.std(self.patterns_, axis=0), self.compute_dtype) + 1e-12
             self.bandwidth_params = std
         elif self.bandwidth_sharing == "per_class":
@@ -109,7 +90,6 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
             self.classes_, self.y_encoded_ = np.unique(y, return_inverse=True)
             self.n_classes_ = len(self.classes_)
 
-            # initialization with the mean std of the pattern data (per-class)
             self.bandwidth_params = cast_to_dtype(np.zeros(self.n_classes_), self.compute_dtype)
             for cl in np.unique(self.y_encoded_):
                 self.bandwidth_params[cl] = (
@@ -133,7 +113,6 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
             self.classes_, self.y_encoded_  = np.unique(y, return_inverse=True)
             self.n_classes_ = len(self.classes_)
 
-            # initialization with the std of the pattern data (per-class per-feature)
             self.bandwidth_params = cast_to_dtype(
                 np.zeros((self.n_classes_, self.feature_size)),
                 self.compute_dtype,
@@ -153,25 +132,13 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
         return self
 
     def __broadcast_bandwidth(self, bandwidth_vector):
-        """
-        Returns bandwidth in the minimal shape required by the kernel.
-        Возвращает вектор параметров ширины в минимальной форме,
-        необходимой для kernel-функции:
-            - (n_patterns, n_features) при bandwidth_sharing="per_class_per_feature"
-            - (n_features,) при bandwidth_sharing="per_feature"
-            - (n_patterns,) при bandwidth_sharing="per_class"
-
-        """
+        """Expand class-level bandwidth to pattern-level by indexing with y_encoded_."""
         if self.bandwidth_sharing == "per_feature":
             return bandwidth_vector
         elif self.bandwidth_sharing == "per_class":
-            # per class bandwidth_vector shape (n_classes,)
-            # параметр ширины для каждого класса с размером (n_classes,)
-            return bandwidth_vector[self.y_encoded_]  # (n_patterns,) classes aligned
+            return bandwidth_vector[self.y_encoded_]  # (n_classes,) → (n_patterns,)
         elif self.bandwidth_sharing == "per_class_per_feature":
-            # per class per feature bandwidth_vector shape (n_classes, n_features)
-            # параметр ширины для каждого класса по каждому признаку с размером (n_classes, n_features)
-            return bandwidth_vector[self.y_encoded_]  # (n_patterns, n_features)  classes aligned
+            return bandwidth_vector[self.y_encoded_]  # (n_classes, n_features) → (n_patterns, n_features)
         else:
             raise ValueError(f"Unknown bandwidth_sharing={self.bandwidth_sharing}")
 
@@ -216,10 +183,8 @@ class AdaptivePatternLayer(TransformerMixin, BaseEstimator):
 
         raise ValueError(f"Unknown bandwidth_sharing={self.bandwidth_sharing}")
 
-    def _loo(self, bandwidth = None):
-        """Returns the kernel matrix for the Leave-One-Out (LOO)
-        Возвращает матрицу значений ядра для объектов из обучающей выборки с помощью Leave-One-Out (LOO)
-        """
+    def _loo(self, bandwidth=None):
+        """Return the kernel matrix for Leave-One-Out: K computed on training patterns with diagonal zeroed."""
         if bandwidth is None:
             bandwidth = self.bandwidth_params
         bandwidth = self._prepare_bandwidth(bandwidth)

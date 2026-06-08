@@ -4,9 +4,6 @@ import numpy as np
 from probabilisticnn.base.types import KernelCallable
 
 
-# ------------------------------------------------------------------------------
-# Utils funcitons
-# ------------------------------------------------------------------------------
 def _validate_bandwidth_numpy(bandwidth) -> None:
     if np.any(bandwidth <= 0):
         raise ValueError("`bandwidth` must be strictly positive.")
@@ -50,14 +47,8 @@ def _exponential_normalization_constant(bandwidth, n_features: int, bandwidth_sh
     if bandwidth_sharing == "per_class_per_feature":
         return np.asarray(base_constant / np.prod(bandwidth, axis=1), dtype=dtype)
     raise ValueError(f"Unsupported bandwidth_sharing={bandwidth_sharing!r}.")
-# ------------------------------------------------------------------------------
 
 
-# ------------------------------------------------------------------------------
-# Kernels
-# ------------------------------------------------------------------------------
-
-# gaussian kernel
 class GaussianKernel:
     def __call__(
         self,
@@ -70,7 +61,6 @@ class GaussianKernel:
         """Compute Gaussian kernel values between samples in X and W."""
         _validate_bandwidth_numpy(bandwidth)
 
-        # скалярный bandwidth
         if bandwidth_sharing == "scalar":
             bandwidth_sq = bandwidth * bandwidth
             if normalized:
@@ -84,7 +74,6 @@ class GaussianKernel:
             scaled_distance = l2_norm_sq / (2.0 * bandwidth_sq)
             return _exp_from_scaled_distance(scaled_distance)
 
-        # bandwidth по каждому признаку
         elif bandwidth_sharing == "per_feature":
             bandwidth_sq = np.square(bandwidth)
             bandw_inv = 1.0 / (2.0 * bandwidth_sq)
@@ -93,7 +82,6 @@ class GaussianKernel:
             scaled_distance = x_norm_sq + w_norm_sq - 2.0 * np.dot(X, (W * bandw_inv).T)
             return _exp_from_scaled_distance(scaled_distance)
 
-        # bandwidth по каждому классу
         elif bandwidth_sharing == "per_class":
             bandwidth_sq = np.square(bandwidth)
             bandw_inv = 1.0 / (2.0 * bandwidth_sq)
@@ -101,15 +89,12 @@ class GaussianKernel:
             w_norm_sq = np.square(W).sum(axis=1)
             scaled_distance = (x_norm_sq + w_norm_sq - 2.0 * np.dot(X, W.T)) * bandw_inv
 
-            # normalized kernel since the bandwidth is different for each class
             dtype = np.asarray(bandwidth).dtype
             n_features = X.shape[1]
             base_constant = dtype.type(np.power(2.0 * math.pi, -0.5 * n_features))
             normalization = base_constant * np.power(bandwidth, -n_features)
             return _exp_from_scaled_distance(scaled_distance) * normalization[None, :]
 
-
-        # bandwidth по каждому классу по каждому признаку
         elif bandwidth_sharing == "per_class_per_feature":
             bandwidth_sq = np.square(bandwidth)
             bandw_inv = 1.0 / (2.0 * bandwidth_sq)
@@ -138,21 +123,18 @@ class GaussianKernel:
         _validate_bandwidth_numpy(bandwidth)
         bandwidth_pow_3 = np.power(bandwidth, 3)
 
-        # скалярный bandwidth
         if bandwidth_sharing == "scalar":
             x_norm_sq = np.square(X).sum(axis=1, keepdims=True)
             w_norm_sq = np.square(W).sum(axis=1)
             l2_norm_sq = x_norm_sq + w_norm_sq - 2.0 * np.dot(X, W.T)
             return l2_norm_sq / (bandwidth_pow_3)
 
-        # bandwidth по каждому признаку
         elif bandwidth_sharing == "per_feature":
             diff = X[:, None, :] - W[None, :, :]
             np.square(diff, out=diff)
             diff /= bandwidth[None, None, :] ** 3
             return diff
 
-        # bandwidth по каждому классу
         elif bandwidth_sharing == "per_class":
             bandw_inv_pow3 = 1.0 / (bandwidth ** 3)  # (n_patterns,)
 
@@ -172,20 +154,17 @@ class GaussianKernel:
                 - n_features / bandwidth[None, :]
             )
 
-        # bandwidth по каждому классу по каждому признаку
         elif bandwidth_sharing == "per_class_per_feature":
             diff = X[:, None, :] - W[None, :, :]
             np.square(diff, out=diff)
             diff /= bandwidth[None, :, :] ** 3
             diff -= 1.0 / bandwidth[None, :, :]
             return diff
-        
+
         else:
             raise ValueError(f"Unknown bandwidth_sharing={bandwidth_sharing!r}.")
-      
- 
-    
-# laplacian kernel
+
+
 class LaplacianKernel:
     def __call__(
         self,
@@ -200,7 +179,7 @@ class LaplacianKernel:
 
         if bandwidth_sharing == "scalar":
             l1_norm = np.abs(X[:, None, :] - W[None, :, :]).sum(axis=2)
-            scaled_distance = l1_norm / (bandwidth)
+            scaled_distance = l1_norm / bandwidth
             return _exp_from_scaled_distance(scaled_distance)
 
         elif bandwidth_sharing == "per_feature":
@@ -210,7 +189,7 @@ class LaplacianKernel:
 
         elif bandwidth_sharing == "per_class":
             l1_norm = np.abs(X[:, None, :] - W[None, :, :]).sum(axis=2)
-            scaled_distance = l1_norm / bandwidth  # bandwidth shape (n_patterns,) - broadcasted
+            scaled_distance = l1_norm / bandwidth  # (n_patterns,) broadcasted
             normalization = _laplacian_normalization_constant(bandwidth, X.shape[1], bandwidth_sharing)
             return _exp_from_scaled_distance(scaled_distance) * normalization[None, :]
 
@@ -248,7 +227,7 @@ class LaplacianKernel:
             l1_norm = np.abs(X[:, None, :] - W[None, :, :]).sum(axis=2)
             n_features = X.shape[1]
             return (
-                l1_norm / (bandwidth**2) # bandwidth shape (n_patterns,) - broadcasted
+                l1_norm / (bandwidth**2)  # (n_patterns,) broadcasted
                 - n_features / bandwidth
             )
 
@@ -262,8 +241,6 @@ class LaplacianKernel:
             raise ValueError(f"Unknown bandwidth_sharing={bandwidth_sharing!r}.")
 
 
-
-# exponential kernel
 class ExponentialKernel:
     def __call__(
         self,
@@ -276,7 +253,6 @@ class ExponentialKernel:
         """Compute exponential kernel values between samples in X and W."""
         _validate_bandwidth_numpy(bandwidth)
 
-        # скалярный bandwidth
         if bandwidth_sharing == "scalar":
             if normalized:
                 l2_norm = np.sqrt(np.clip(2*(1-np.dot(X, W.T)), 0, None))
@@ -288,13 +264,11 @@ class ExponentialKernel:
             l2_norm = np.sqrt(np.clip(l2_norm_sq, 0, None))
             return _exp_from_scaled_distance(l2_norm / bandwidth)
 
-        # bandwidth по каждому признаку
         elif bandwidth_sharing == "per_feature":
             diff = (X[:, None, :] - W[None, :, :]) / bandwidth
             np.square(diff, out=diff)
             return _exp_from_scaled_distance(np.sqrt(diff.sum(axis=2)))
 
-        # bandwidth по каждому классу
         elif bandwidth_sharing == "per_class":
             scaled_diff = (X[:, None, :] - W[None, :, :]) / bandwidth[None, :, None]
             scaled_distance = np.sqrt(np.square(scaled_diff).sum(axis=2))
@@ -305,7 +279,6 @@ class ExponentialKernel:
             normalization = base_constant * np.power(bandwidth, -n_features)
             return _exp_from_scaled_distance(scaled_distance) * normalization[None, :]
 
-        # bandwidth по каждому классу по каждому признаку
         elif bandwidth_sharing == "per_class_per_feature":
             diff = X[:, None, :] - W[None, :, :]
             diff /= bandwidth[None, :, :]
@@ -341,7 +314,6 @@ class ExponentialKernel:
 
             return l2_norm / (bandwidth ** 2)
 
-        # bandwidth по каждому признаку
         elif bandwidth_sharing == "per_feature":
             diff = X[:, None, :] - W[None, :, :]         # (n_samples, n_patterns, n_features)
             np.square(diff, out=diff)                     # diff = (x-w)^2, in-place
@@ -352,7 +324,6 @@ class ExponentialKernel:
             diff /= np.where(r > 0.0, r, np.inf)
             return diff
 
-        # bandwidth по каждому классу
         elif bandwidth_sharing == "per_class":
             x_norm_sq = np.square(X).sum(axis=1, keepdims=True)
             w_norm_sq = np.square(W).sum(axis=1)
@@ -370,7 +341,6 @@ class ExponentialKernel:
 
             return l2_norm / bandwidth[None, :] ** 2 - n_features / bandwidth[None, :]
 
-        # bandwidth по каждому классу по каждому признаку
         elif bandwidth_sharing == "per_class_per_feature":
             diff = X[:, None, :] - W[None, :, :]
             np.square(diff, out=diff)                          # diff = (x-w)^2, in-place

@@ -16,7 +16,6 @@ class SummationLayer(BaseEstimator, TransformerMixin):
         self.n_classes_ = len(self.classes_)
         self.n_train_ = n_train
 
-        # class_mask[i, j] = 1, если i-й обучающий объект принадлежит j-му классу.
         self.class_mask_ = np.zeros((n_train, self.n_classes_), dtype=X.dtype)
         self.class_mask_[np.arange(n_train), self.y_encoded_] = 1.0
         return self

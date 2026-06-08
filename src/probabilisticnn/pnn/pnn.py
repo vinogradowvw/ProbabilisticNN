@@ -11,13 +11,7 @@ from probabilisticnn.base.utils import validate_backend
 
 
 class PNN(ClassifierMixin, BaseEstimator):
-    """Classic Probabilistic Neural Network classifier.
-
-    Классический классификатор Probabilistic Neural Network.
-
-    Uses a fixed kernel bandwidth for all features and all patterns.
-    Использует фиксированную ширину ядра для всех признаков и всех паттернов.
-    """
+    """Classic Probabilistic Neural Network classifier with a fixed scalar bandwidth."""
 
     def __init__(
         self,
@@ -36,10 +30,7 @@ class PNN(ClassifierMixin, BaseEstimator):
         self.compute_dtype = compute_dtype
 
     def fit(self, X, y):
-        """Store training patterns and fit all PNN layers.
-
-        Сохраняет обучающие паттерны и обучает все слои PNN.
-        """
+        """Store training patterns and fit all PNN layers."""
         validate_backend(self.backend)
         X, y = validate_data(self, X, y)
         X = cast_to_dtype(X, self.compute_dtype)
@@ -59,10 +50,7 @@ class PNN(ClassifierMixin, BaseEstimator):
         return self
 
     def predict(self, X):
-        """Predict class labels for input samples.
-
-        Предсказывает метки классов для входных объектов.
-        """
+        """Predict class labels for input samples."""
         check_is_fitted(
             self,
             ["classes_", "y_", "pattern_layer_", "summation_layer_", "output_layer_"],
@@ -93,10 +81,7 @@ class PNN(ClassifierMixin, BaseEstimator):
         return self.output_layer_.transform(f)
 
     def predict_proba(self, X):
-        """Predict posterior class probabilities for input samples.
-
-        Предсказывает апостериорные вероятности классов для входных объектов.
-        """
+        """Predict posterior class probabilities for input samples."""
         check_is_fitted(
             self,
             ["classes_", "y_", "pattern_layer_", "summation_layer_", "output_layer_"],
@@ -112,20 +97,9 @@ class PNN(ClassifierMixin, BaseEstimator):
 
 
 class AdaptivePNN(PNN):
-    """Adaptive Probabilistic Neural Network
+    """PNN with bandwidth parameters optimized via LOO loss minimization.
 
-    Uses optimization over a loss function for the bandwidth parameters
-    Использует оптимизацию loss-функции по параметрам ширины ядра
-
-    Available parameters sharing types:
-    - per class bandwidth
-    - per feature bandwidth
-    - per class per feature bandwidth
-
-    Доступные типы совместного использования параметров:
-    - ширина на класс
-    - ширина на признак
-    - ширина на класс и признак
+    Bandwidth can be shared per feature, per class, or per class per feature.
     """
     def __init__(
         self,
@@ -157,23 +131,14 @@ class AdaptivePNN(PNN):
         self.backend = backend
         self.compute_dtype = compute_dtype
 
-    def fit(
-        self,
-        X,
-        y
-    ):
-        """Fit AdaptivePNN layers and optimize bandwidth parameters.
-
-        Обучает слои AdaptivePNN и оптимизирует параметры ширины.
-        """
+    def fit(self, X, y):
+        """Fit AdaptivePNN layers and optimize bandwidth parameters."""
         validate_backend(self.backend)
         X, y = validate_data(self, X, y)
         X = cast_to_dtype(X, self.compute_dtype)
         self.classes_ = unique_labels(y)
         self.y_ = y
 
-        # Adaptive pattern layer owns trainable bandwidth parameters.
-        # Adaptive pattern layer хранит обучаемые параметры ширины.
         self.pattern_layer_ = AdaptivePatternLayer(
             kernel=self.kernel,
             bandwidth_sharing=self.bandwidth_sharing,
@@ -184,8 +149,6 @@ class AdaptivePNN(PNN):
         self.summation_layer_ = SummationLayer().fit(X, y)
         self.output_layer_ = OutputLayer(self.losses, self.compute_dtype).fit(y)
 
-        # Bandwidth optimizer runs the LOO training objective.
-        # Оптимизатор ширин запускает обучающую LOO-цель.
         self.optimizer_ = BandwidthOptimizer(
             model=self,
             loss=self.loss,
@@ -200,10 +163,7 @@ class AdaptivePNN(PNN):
         return self
 
     def _forward_train(self, bandwidth=None, return_proba=False, return_encoded=False):
-        """Run Leave-One-Out forward pass on the training set.
-
-        Выполняет Leave-One-Out forward pass на обучающей выборке.
-        """
+        """Run Leave-One-Out forward pass on the training set."""
         if return_proba and return_encoded:
             raise ValueError("`return_proba` and `return_encoded` cannot both be True.")
 
@@ -219,10 +179,7 @@ class AdaptivePNN(PNN):
         return out
 
     def predict_proba(self, X):
-        """Predict posterior class probabilities with optimized bandwidths.
-
-        Предсказывает апостериорные вероятности с оптимизированными ширинами.
-        """
+        """Predict posterior class probabilities with optimized bandwidths."""
         check_is_fitted(
             self,
             [
@@ -243,10 +200,7 @@ class AdaptivePNN(PNN):
         return posteriori
 
     def predict(self, X):
-        """Predict class labels with optimized bandwidths.
-
-        Предсказывает метки классов с оптимизированными ширинами.
-        """
+        """Predict class labels with optimized bandwidths."""
         check_is_fitted(
             self,
             [

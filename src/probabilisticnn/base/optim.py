@@ -52,10 +52,7 @@ def _resolve_solver(solver):
 
 
 class BandwidthOptimizer:
-    """Optimize AdaptivePNN/AdaptiveGRNN bandwidth parameters.
-
-    Оптимизирует параметры ширины AdaptivePNN/AdaptiveGRNN.
-    """
+    """Optimize AdaptivePNN/AdaptiveGRNN bandwidth parameters."""
 
     def __init__(
         self,
@@ -91,10 +88,7 @@ class BandwidthOptimizer:
         return "auto"
 
     def _forward_state(self, bandwidth):
-        """Run the model's LOO training forward pass.
-
-        Выполняет обучающий LOO forward pass модели.
-        """
+        """Run the model's LOO training forward pass."""
         if self._is_pnn_model():
             y_pred = self.model._forward_train(bandwidth, return_encoded=True)
             f = self.model.summation_layer_.last_f_
@@ -142,11 +136,9 @@ class BandwidthOptimizer:
         return bool(np.all(theta >= theta_min) and np.all(theta <= theta_max))
 
     def _pack_bandwidth(self):
-        """Pack current bandwidth parameters into a flat optimization vector.
+        """Pack current bandwidth into a flat log-space vector.
 
-        Упаковывает текущие параметры ширины в вектор оптимизации.
-
-        Оптимизуем логарифмы чтобы обойтись без оптимизации с ограничеями
+        Log-parameterization keeps bandwidth positive without box constraints.
         """
         min_bandwidth, max_bandwidth = self._bandwidth_limits()
         bandwidth_params = np.asarray(
@@ -159,10 +151,7 @@ class BandwidthOptimizer:
         return bandwidth_params.copy()
 
     def _unpack_bandwidth(self, theta):
-        """Unpack raw bandwidth parameters from the optimization vector.
-
-        Распаковывает исходные параметры ширины из вектора оптимизации.
-        """
+        """Unpack bandwidth from the log-space optimization vector."""
         theta = np.asarray(theta, dtype=np.float64)
         pattern_layer = self.model.pattern_layer_
         bandwidth_sharing = pattern_layer.bandwidth_sharing
@@ -177,10 +166,7 @@ class BandwidthOptimizer:
         raise ValueError(f"Unknown bandwidth_sharing={bandwidth_sharing!r}.")
 
     def _objective(self, theta, *args, **kwargs):
-        """Compute the scalar optimization objective.
-
-        Вычисляет скалярное значение целевой функции оптимизации.
-        """
+        """Compute the scalar optimization objective."""
         theta = np.asarray(theta, dtype=np.float64)
         if not self._theta_is_safe(theta):
             return INVALID_OBJECTIVE
@@ -201,8 +187,7 @@ class BandwidthOptimizer:
         return float(loss) if np.isfinite(loss) else INVALID_OBJECTIVE
 
     def _jac(self, theta, X, y, model, loo=True):
-        """Compute the gradient of the objective function.
-        """
+        """Compute the gradient of the objective function."""
         theta = np.asarray(theta, dtype=np.float64)
         if not self._theta_is_safe(theta):
             return np.zeros_like(theta)
@@ -262,10 +247,7 @@ class BandwidthOptimizer:
         return float(loss), np.ravel(grad_theta)
 
     def optimize(self):
-        """Optimize bandwidths and store the best observed parameters.
-
-        Оптимизирует ширины и сохраняет лучшие найденные параметры.
-        """
+        """Optimize bandwidths and store the best observed parameters."""
         theta_min, theta_max = self._theta_limits()
         theta0 = np.asarray(self._pack_bandwidth(), dtype=np.float64)
         theta0 = np.clip(theta0, theta_min, theta_max)

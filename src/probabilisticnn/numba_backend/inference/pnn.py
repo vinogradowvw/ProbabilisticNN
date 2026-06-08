@@ -1,6 +1,7 @@
 import numpy as np
 
-from probabilisticnn.numba_backend.kernels import resolve_kernel
+from probabilisticnn.numba_backend.kernels import resolve_matrix_kernel
+
 
 def pnn_jit_inference(
     kernel: str,
@@ -13,15 +14,21 @@ def pnn_jit_inference(
     bandwidth_sharing: str,
     normalized: bool = False,
 ):
-    """Compute PNN output with the numba kernel backend."""
+    """Compute PNN output with the numba kernel backend.
+
+    Mirrors the numpy path (compute K, then reduce with BLAS @) for a fair
+    apples-to-apples comparison. Faster because fastmath enables FP rewrites
+    and JIT eliminates Python overhead.
+    """
     likelihood_multiplier = np.asarray(likelihood_multiplier, dtype=X.dtype)
-    bandwidth = np.asarray(bandwidth, dtype=X.dtype)
-    kernel_ = resolve_kernel(kernel)
-    K = kernel_(X, W, bandwidth, bandwidth_sharing, normalized)
+    bandwidth_arr = np.asarray(bandwidth, dtype=X.dtype)
+    bandwidth_arg = bandwidth_arr[()] if bandwidth_sharing == "scalar" else bandwidth_arr
 
-    class_mask = np.zeros((y_encoded.shape[0], n_classes), dtype=X.dtype)
-    class_mask[np.arange(y_encoded.shape[0]), y_encoded] = 1.0
+    n_patterns = W.shape[0]
+    class_mask = np.zeros((n_patterns, n_classes), dtype=X.dtype)
+    class_mask[np.arange(n_patterns), y_encoded] = 1.0
 
-    f = np.dot(K, class_mask) / n_classes
-    posterior = f * likelihood_multiplier
-    return np.argmax(posterior, axis=1)
+    W_cast = np.asarray(W, dtype=X.dtype)
+    K = resolve_matrix_kernel(kernel, bandwidth_sharing)(X, W_cast, bandwidth_arg, normalized)
+    f = K @ class_mask
+    return np.argmax(f * likelihood_multiplier, axis=1).astype(np.int64)
