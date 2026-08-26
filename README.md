@@ -1,3 +1,4 @@
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/probabilisticnn?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/probabilisticnn)
 # ProbabilisticNN
 
 `ProbabilisticNN` is a Python library for Probabilistic Neural Networks and General Regression Neural Networks with an sklearn-like interface.
