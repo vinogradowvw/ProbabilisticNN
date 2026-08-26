@@ -37,8 +37,6 @@ For the accelerated backend, `numba` is additionally required.
 
 ## Installation
 
-### Installation from TestPyPI
-
 For regular usage without `numba`:
 
 ```bash
